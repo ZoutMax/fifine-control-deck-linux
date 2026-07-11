@@ -237,7 +237,12 @@ class MainWindow(QMainWindow):
         self.page_combo.blockSignals(True)
         self.page_combo.clear()
         for n, pg in enumerate(self._profile().pages):
-            self.page_combo.addItem(pg.name or f"Page {n+1}", pg.id)
+            # Number by position so entries are always unique and sequential
+            # (stored names can be stale/duplicated after add/delete).
+            label = f"Page {n + 1}"
+            if pg.name and not pg.name.lower().startswith(("page", "main")):
+                label = f"{n + 1}: {pg.name}"   # show custom names too
+            self.page_combo.addItem(label, pg.id)
         self.page_combo.setCurrentIndex(min(self.controller.page_index,
                                             self.page_combo.count() - 1))
         self.page_combo.blockSignals(False)
@@ -295,8 +300,13 @@ class MainWindow(QMainWindow):
             self._queue_save()
 
     def _add_page(self):
-        self._profile().pages.append(Page(name=f"Page {len(self._profile().pages)+1}"))
+        prof = self._profile()
+        prof.pages.append(Page(name="Page"))
+        # jump to and show the new page
+        self.controller.page_index = len(prof.pages) - 1
         self._reload_pages()
+        self._refresh_all_previews()
+        self.controller.render_page()
         self._queue_save()
 
     def _del_page(self):
