@@ -116,6 +116,23 @@ ACTION_DEFAULT_ICON = {
 }
 
 
+def default_icon_for(action) -> tuple[str, str]:
+    """Best (library-icon-name, label) for an action, following its sub-command
+    so e.g. Volume up/down/mute each get their own icon."""
+    t = action.type
+    p = action.params
+    if t == "volume":
+        return ({"up": "volume_up", "down": "volume_down", "mute": "mute"}
+                .get(p.get("cmd", "up"), "volume_up"), "Volume")
+    if t == "media":
+        return ({"play-pause": "play", "next": "next", "previous": "prev",
+                 "stop": "stop"}.get(p.get("cmd", "play-pause"), "play"), "Media")
+    if t == "brightness":
+        return ({"up": "brightness_up", "down": "brightness_down",
+                 "set": "brightness_up"}.get(p.get("mode", "set"), "brightness_up"), "Bright")
+    return ACTION_DEFAULT_ICON.get(t, ("", ""))
+
+
 def _popen_detached(args, shell=False):
     subprocess.Popen(
         args, shell=shell, start_new_session=True,

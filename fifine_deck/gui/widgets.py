@@ -362,11 +362,22 @@ class ActionEditor(QWidget):
     def _on_edit(self, *_):
         if self._building or self._kc is None:
             return
+        from ..actions import default_icon_for
+        new_action = self.params.get_action()
+        # Make the icon follow the action's sub-command (up/down/mute, etc.),
+        # but never overwrite a custom icon the user chose via File…
+        cur_icon = self.icon_edit.text()
+        if not cur_icon or assets.is_library_icon(cur_icon):
+            want = assets.library_path(default_icon_for(new_action)[0])
+            if want and want != cur_icon:
+                self._building = True
+                self.icon_edit.setText(want)
+                self._building = False
         self._kc.label = self.label_edit.text()
         self._kc.icon = self.icon_edit.text()
         self._kc.bg_color = self.bg_btn.color()
         self._kc.text_color = self.fg_btn.color()
-        self._kc.action = self.params.get_action()
+        self._kc.action = new_action
         self.changed.emit()
 
 

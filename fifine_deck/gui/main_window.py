@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
 from .. import rendering, assets
 from ..device import DEVICE_PROFILE
 from ..model import DeckConfig, Profile, Page, KeyConfig, Action
-from ..actions import ACTION_DEFAULT_ICON
+from ..actions import default_icon_for
 from ..controller import DeckController
 from .widgets import KeyButton, ActionEditor, ActionCatalog, KnobEditor
 
@@ -369,12 +369,9 @@ class MainWindow(QMainWindow):
     def _on_action_dropped(self, index: int, atype: str):
         kc = self._page().key(index)
         kc.action = Action(atype, {})
-        icon_name, label = ACTION_DEFAULT_ICON.get(atype, ("", ""))
+        icon_name, label = default_icon_for(kc.action)
         if icon_name and not kc.icon:
-            for it in assets.load_library():
-                if it["name"] == icon_name:
-                    kc.icon = it["file"]
-                    break
+            kc.icon = assets.library_path(icon_name)
         if label and not kc.label:
             kc.label = label
         self.buttons[index].update_preview(kc)
