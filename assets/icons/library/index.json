@@ -1,0 +1,122 @@
+{
+  "volume_up": {
+    "file": "volume_up.png",
+    "label": "Volume +",
+    "category": "Audio"
+  },
+  "volume_down": {
+    "file": "volume_down.png",
+    "label": "Volume \u2212",
+    "category": "Audio"
+  },
+  "mute": {
+    "file": "mute.png",
+    "label": "Mute",
+    "category": "Audio"
+  },
+  "play": {
+    "file": "play.png",
+    "label": "Play",
+    "category": "Media"
+  },
+  "pause": {
+    "file": "pause.png",
+    "label": "Pause",
+    "category": "Media"
+  },
+  "stop": {
+    "file": "stop.png",
+    "label": "Stop",
+    "category": "Media"
+  },
+  "next": {
+    "file": "next.png",
+    "label": "Next",
+    "category": "Media"
+  },
+  "prev": {
+    "file": "prev.png",
+    "label": "Previous",
+    "category": "Media"
+  },
+  "brightness_up": {
+    "file": "brightness_up.png",
+    "label": "Bright +",
+    "category": "Device"
+  },
+  "brightness_down": {
+    "file": "brightness_down.png",
+    "label": "Bright \u2212",
+    "category": "Device"
+  },
+  "next_page": {
+    "file": "next_page.png",
+    "label": "Next page",
+    "category": "Navigation"
+  },
+  "prev_page": {
+    "file": "prev_page.png",
+    "label": "Prev page",
+    "category": "Navigation"
+  },
+  "folder": {
+    "file": "folder.png",
+    "label": "Folder",
+    "category": "Apps"
+  },
+  "terminal": {
+    "file": "terminal.png",
+    "label": "Terminal",
+    "category": "Apps"
+  },
+  "web": {
+    "file": "web.png",
+    "label": "Website",
+    "category": "Apps"
+  },
+  "mic": {
+    "file": "mic.png",
+    "label": "Mic",
+    "category": "Media"
+  },
+  "camera": {
+    "file": "camera.png",
+    "label": "Camera",
+    "category": "Media"
+  },
+  "power": {
+    "file": "power.png",
+    "label": "Power",
+    "category": "System"
+  },
+  "lock": {
+    "file": "lock.png",
+    "label": "Lock",
+    "category": "System"
+  },
+  "settings": {
+    "file": "settings.png",
+    "label": "Settings",
+    "category": "System"
+  },
+  "home": {
+    "file": "home.png",
+    "label": "Home",
+    "category": "Apps"
+  },
+  "star": {
+    "file": "star.png",
+    "label": "Star",
+    "category": "Generic"
+  },
+  "heart": {
+    "file": "heart.png",
+    "label": "Heart",
+    "category": "Generic"
+  },
+  "dot": {
+    "file": "dot.png",
+    "label": "Dot",
+    "category": "Generic"
+  }
+}

@@ -5,7 +5,7 @@ __pycache__/
 *.tmp
 .venv/
 build/
-dist/
+/dist/
 *.egg-info/
 # local runtime artifacts
 /tmp/

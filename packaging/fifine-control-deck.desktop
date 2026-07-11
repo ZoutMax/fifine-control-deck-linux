@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=fifine Control Deck
+GenericName=Stream Deck Controller
+Comment=Control your fifine / Stream Dock macro keypad
+Exec=fifine-control-deck
+Icon=fifine-control-deck
+Terminal=false
+Categories=Utility;
+Keywords=streamdeck;macro;keypad;fifine;streamdock;hotkey;
+StartupNotify=true
+StartupWMClass=fifine Control Deck

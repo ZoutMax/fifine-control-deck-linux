@@ -51,7 +51,27 @@ The status bar shows what was detected on your session.
 > On X11, `xdotool` works with no daemon. `playerctl` (media) and `wpctl`
 > (volume) need no daemon.
 
-## Setup
+## Install (.deb — recommended)
+
+Download the `.deb` from the
+[latest release](https://github.com/ZoutMax/fifine-control-deck-linux/releases)
+and install it like any normal application:
+
+```bash
+sudo apt install ./fifine-control-deck_*_amd64.deb
+```
+
+This installs the app, a desktop launcher (**fifine Control Deck** appears in
+your app menu), the icon, and the udev rule. Make sure you're in the `plugdev`
+group, then unplug/replug the device once:
+
+```bash
+sudo usermod -aG plugdev "$USER"   # then log out/in if it was just added
+```
+
+To build the `.deb` yourself: `./packaging/build-deb.sh` → `dist/`.
+
+## Run from source (development)
 
 1. **Install the udev rule** (one time, needs root) so the device is usable
    without `sudo`:
@@ -69,6 +89,12 @@ The status bar shows what was detected on your session.
    ```
 
    or `python3 -m fifine_deck`. Use `--headless` for the daemon-only mode.
+
+## Icons
+
+The app ships a built-in icon library (`assets/icons/library/`) — pick icons in
+the key editor via **Library…**, or load your own image with **File…**. Icons
+are regenerated with `python3 tools/make_icons.py`.
 
 ## Autostart (optional)
 

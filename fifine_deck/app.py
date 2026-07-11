@@ -11,7 +11,10 @@ from .controller import DeckController
 
 def run_gui() -> int:
     from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtGui import QIcon
     from .gui.main_window import MainWindow
+    from .gui.style import STYLESHEET
+    from . import assets
 
     ensure_dirs()
     config = DeckConfig.load()
@@ -19,6 +22,11 @@ def run_gui() -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName("fifine Control Deck")
+    app.setApplicationDisplayName("fifine Control Deck")
+    app.setDesktopFileName("fifine-control-deck")
+    if assets.app_icon_path():
+        app.setWindowIcon(QIcon(assets.app_icon_path()))
+    app.setStyleSheet(STYLESHEET)
     app.setQuitOnLastWindowClosed(False)  # live in the tray
 
     win = MainWindow(config, controller)

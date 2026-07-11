@@ -1,0 +1,26 @@
+#!/bin/sh
+set -e
+
+# Reload udev so the device permission rule takes effect.
+if command -v udevadm >/dev/null 2>&1; then
+    udevadm control --reload-rules || true
+    udevadm trigger || true
+fi
+
+# Refresh icon + desktop caches.
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -f -t /usr/share/icons/hicolor >/dev/null 2>&1 || true
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q /usr/share/applications || true
+fi
+
+echo "-------------------------------------------------------------------"
+echo " fifine Control Deck installed."
+echo " If key access fails, add yourself to the 'plugdev' group and"
+echo " re-login:   sudo usermod -aG plugdev \"\$USER\""
+echo " Then unplug/replug the device. Launch from your app menu or run:"
+echo "   fifine-control-deck"
+echo "-------------------------------------------------------------------"
+
+exit 0

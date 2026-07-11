@@ -88,12 +88,21 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.bright)
         root.addLayout(bar)
 
-        # key grid
+        # key grid, centered on a "device" panel
         self.grid_host = QWidget()
+        self.grid_host.setObjectName("deckPanel")
+        self.grid_host.setStyleSheet(
+            "#deckPanel{background:#0d0d0d;border:1px solid #333;border-radius:18px;}")
         self.grid = QGridLayout(self.grid_host)
-        self.grid.setSpacing(10)
-        self.grid.setContentsMargins(20, 20, 20, 20)
-        root.addWidget(self.grid_host, 1)
+        self.grid.setSpacing(12)
+        self.grid.setContentsMargins(24, 24, 24, 24)
+        center = QHBoxLayout()
+        center.addStretch()
+        center.addWidget(self.grid_host)
+        center.addStretch()
+        wrap = QWidget()
+        wrap.setLayout(center)
+        root.addWidget(wrap, 1)
 
         self.setCentralWidget(central)
 
@@ -162,7 +171,10 @@ class MainWindow(QMainWindow):
         self.tray.show()
 
     def _app_icon(self) -> QIcon:
-        img = rendering.render_key(64, "fC", "", "#00c8ff", "#001018")
+        from .. import assets
+        if assets.app_icon_path():
+            return QIcon(assets.app_icon_path())
+        img = rendering.render_key(64, "fC", "", "#1551ff", "#ffffff")
         return QIcon(QPixmap.fromImage(rendering.pil_to_qimage(img)))
 
     # -- grid --------------------------------------------------------------

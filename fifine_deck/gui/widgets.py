@@ -6,12 +6,57 @@ from PyQt6.QtGui import QPixmap, QColor, QIcon
 from PyQt6.QtWidgets import (
     QToolButton, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
     QLineEdit, QPlainTextEdit, QComboBox, QPushButton, QColorDialog, QFileDialog,
-    QSpinBox,
+    QSpinBox, QDialog, QScrollArea, QGridLayout,
 )
 
-from .. import rendering
+from .. import rendering, assets
 from ..actions import ACTION_TYPES
 from ..model import KeyConfig, Action
+
+
+class IconLibraryDialog(QDialog):
+    """Grid of built-in icons grouped by category; returns the chosen path."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Icon library")
+        self.resize(520, 460)
+        self.chosen = ""
+        root = QVBoxLayout(self)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        host = QWidget()
+        vbox = QVBoxLayout(host)
+        items = assets.load_library()
+        cats: dict[str, list] = {}
+        for it in items:
+            cats.setdefault(it["category"], []).append(it)
+        for cat in sorted(cats):
+            lbl = QLabel(cat)
+            lbl.setStyleSheet("font-weight:bold;color:#9a9a9a;margin-top:8px;")
+            vbox.addWidget(lbl)
+            grid_host = QWidget()
+            grid = QGridLayout(grid_host)
+            grid.setSpacing(6)
+            for i, it in enumerate(cats[cat]):
+                b = QToolButton()
+                b.setFixedSize(74, 90)
+                b.setIconSize(QSize(56, 56))
+                b.setIcon(QIcon(it["file"]))
+                b.setText(it["label"])
+                b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+                b.setStyleSheet("QToolButton{border:1px solid #333;border-radius:8px;"
+                                "background:#1f1f1f;font-size:10px;}"
+                                "QToolButton:hover{border-color:#409eff;}")
+                b.clicked.connect(lambda _, p=it["file"]: self._pick(p))
+                grid.addWidget(b, i // 6, i % 6)
+            vbox.addWidget(grid_host)
+        vbox.addStretch()
+        scroll.setWidget(host)
+        root.addWidget(scroll)
+
+    def _pick(self, path):
+        self.chosen = path
+        self.accept()
 
 
 class KeyButton(QToolButton):
@@ -26,10 +71,11 @@ class KeyButton(QToolButton):
         self.setFixedSize(size + 12, size + 12)
         self.setIconSize(QSize(size, size))
         self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-        self.setStyleSheet(
+        self._base_qss = (
             "QToolButton{border:2px solid #333;border-radius:10px;background:#0b0b12;}"
-            "QToolButton:checked{border:2px solid #00c8ff;}"
-            "QToolButton:hover{border-color:#666;}")
+            "QToolButton:checked{border:2px solid #1551ff;}"
+            "QToolButton:hover{border-color:#409eff;}")
+        self.setStyleSheet(self._base_qss)
         self.clicked.connect(lambda: self.selected.emit(self.index))
 
     def update_preview(self, kc: KeyConfig):
@@ -39,11 +85,8 @@ class KeyButton(QToolButton):
 
     def flash(self, on: bool):
         self.setStyleSheet(
-            ("QToolButton{border:2px solid #00ff88;border-radius:10px;background:#0b0b12;}"
-             if on else
-             "QToolButton{border:2px solid #333;border-radius:10px;background:#0b0b12;}"
-             "QToolButton:checked{border:2px solid #00c8ff;}"
-             "QToolButton:hover{border-color:#666;}"))
+            "QToolButton{border:2px solid #00ff88;border-radius:10px;background:#0b0b12;}"
+            if on else self._base_qss)
 
 
 class ColorButton(QPushButton):
@@ -99,12 +142,15 @@ class ActionEditor(QWidget):
         self.icon_edit = QLineEdit()
         self.icon_edit.setPlaceholderText("(optional) path to image")
         self.icon_edit.textChanged.connect(self._on_edit)
-        icon_btn = QPushButton("Browse…")
+        lib_btn = QPushButton("Library…")
+        lib_btn.clicked.connect(self._pick_library)
+        icon_btn = QPushButton("File…")
         icon_btn.clicked.connect(self._browse_icon)
         clr_btn = QPushButton("×")
         clr_btn.setFixedWidth(28)
         clr_btn.clicked.connect(lambda: self.icon_edit.setText(""))
         icon_row.addWidget(self.icon_edit)
+        icon_row.addWidget(lib_btn)
         icon_row.addWidget(icon_btn)
         icon_row.addWidget(clr_btn)
         form.addRow("Icon", self._wrap(icon_row))
@@ -162,6 +208,11 @@ class ActionEditor(QWidget):
             self, "Choose icon", "", "Images (*.png *.jpg *.jpeg *.svg *.gif *.bmp)")
         if path:
             self.icon_edit.setText(path)
+
+    def _pick_library(self):
+        dlg = IconLibraryDialog(self)
+        if dlg.exec() and dlg.chosen:
+            self.icon_edit.setText(dlg.chosen)
 
     def _on_type_change(self):
         if self._building:
