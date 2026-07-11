@@ -222,8 +222,8 @@ class DeckController:
                 print(f"[controller] action worker error: {e}", flush=True)
 
     def flash_key(self, index: int, pressed: bool) -> None:
-        """Glow a key on the device while pressed; restore it on release.
-        Skips animated (GIF) keys, which the GIF loop keeps repainting."""
+        """Flash a key (brightened) on the device while pressed; restore it on
+        release. Skips animated (GIF) keys, which the GIF loop keeps repainting."""
         if not self.config.glow:
             return
         with self._lock:

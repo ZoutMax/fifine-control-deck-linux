@@ -9,7 +9,7 @@ import io
 import os
 from functools import lru_cache
 
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter, ImageChops
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
 _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -48,7 +48,7 @@ def render_key(
     pressed: bool = False,
 ) -> Image.Image:
     """Return an RGB PIL image (size x size), upright (no device rotation yet).
-    If pressed, apply a glow (brighten + soft border) for on-device feedback."""
+    If pressed, brighten the whole key as a simple press flash."""
     img = Image.new("RGB", (size, size), _hex(bg_color))
 
     if icon_path and os.path.exists(icon_path):
@@ -87,42 +87,9 @@ def render_key(
             draw.text((x, y), line, font=font, fill=tcol)
 
     if pressed:
-        img = _apply_glow(img)
+        # Simple press feedback: flash the whole key brighter.
+        img = ImageEnhance.Brightness(img.convert("RGB")).enhance(1.6)
     return img
-
-
-def _rounded_mask(size: int, inset: int, radius: int) -> Image.Image:
-    m = Image.new("L", (size, size), 0)
-    ImageDraw.Draw(m).rounded_rectangle(
-        [inset, inset, size - 1 - inset, size - 1 - inset],
-        radius=max(1, radius), fill=255)
-    return m
-
-
-def _apply_glow(img: Image.Image) -> Image.Image:
-    """Pressed-key feedback: a clean, even glowing ring around the button
-    outline. Built by subtracting two filled rounded rectangles (avoids the
-    hard-edged 'bars' PIL's rounded_rectangle(width=…) can leave on the sides)."""
-    size = img.width
-    out = img.convert("RGBA")
-    inset = max(1, int(size * 0.02))
-    rad = int(size * 0.22)
-    line_w = max(2, int(size * 0.045))
-
-    # even ring mask = outer filled shape minus the inner filled shape
-    outer = _rounded_mask(size, inset, rad)
-    inner = _rounded_mask(size, inset + line_w, rad - line_w)
-    ring = ImageChops.subtract(outer, inner)
-
-    color = Image.new("RGBA", (size, size), (110, 205, 255, 255))
-    ring_rgba = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ring_rgba.paste(color, (0, 0), ring)
-
-    # soft bloom, then the crisp ring on top
-    out = Image.alpha_composite(out, ring_rgba.filter(
-        ImageFilter.GaussianBlur(max(2, int(size * 0.03)))))
-    out = Image.alpha_composite(out, ring_rgba)
-    return out.convert("RGB")
 
 
 def _wrap(draw, text, font, max_w):

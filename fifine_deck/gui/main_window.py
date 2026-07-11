@@ -89,7 +89,7 @@ class MainWindow(QMainWindow):
         self.autostart_act.toggled.connect(lambda on: set_autostart(on))
         m.addAction(self.autostart_act)
         # Glow-on-press toggle
-        self.glow_act = QAction("Glow keys on press", self, checkable=True)
+        self.glow_act = QAction("Flash key on press", self, checkable=True)
         self.glow_act.setChecked(bool(self.config.glow))
         self.glow_act.toggled.connect(self._set_glow)
         m.addAction(self.glow_act)
