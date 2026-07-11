@@ -8,14 +8,15 @@ from PyQt6.QtGui import QAction, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QGridLayout, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QPushButton, QSlider, QInputDialog, QMessageBox, QDockWidget,
-    QSystemTrayIcon, QMenu, QStatusBar,
+    QSystemTrayIcon, QMenu, QStatusBar, QScrollArea,
 )
 
-from .. import rendering
+from .. import rendering, assets
 from ..device import DEVICE_PROFILE
-from ..model import DeckConfig, Profile, Page, KeyConfig
+from ..model import DeckConfig, Profile, Page, KeyConfig, Action
+from ..actions import ACTION_DEFAULT_ICON
 from ..controller import DeckController
-from .widgets import KeyButton, ActionEditor
+from .widgets import KeyButton, ActionEditor, ActionCatalog, KnobEditor
 
 
 class _Bridge(QObject):
@@ -106,7 +107,16 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central)
 
-        # editor dock
+        # actions catalog dock (left) — drag onto a key
+        self.catalog = ActionCatalog()
+        cat_dock = QDockWidget("Actions", self)
+        cat_dock.setWidget(self.catalog)
+        cat_dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                             QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+        cat_dock.setMinimumWidth(180)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, cat_dock)
+
+        # editor dock (right)
         self.editor = ActionEditor()
         self.editor.changed.connect(self._on_editor_changed)
         dock = QDockWidget("Key settings", self)
@@ -115,6 +125,9 @@ class MainWindow(QMainWindow):
                          QDockWidget.DockWidgetFeature.DockWidgetFloatable)
         dock.setMinimumWidth(320)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+
+        # knob editors (only for devices with dials)
+        self._build_knobs()
 
         self.setStatusBar(QStatusBar())
         self._set_status()
@@ -190,6 +203,7 @@ class MainWindow(QMainWindow):
             r, c = divmod(idx - 1, cols)
             btn = KeyButton(idx)
             btn.selected.connect(self._on_key_selected)
+            btn.actionDropped.connect(self._on_action_dropped)
             self.grid.addWidget(btn, r, c)
             self.buttons[idx] = btn
         self._refresh_all_previews()
@@ -304,6 +318,48 @@ class MainWindow(QMainWindow):
             b.setChecked(i == index)
         kc = self._page().key(index)
         self.editor.set_key(kc, index)
+
+    def _on_action_dropped(self, index: int, atype: str):
+        kc = self._page().key(index)
+        kc.action = Action(atype, {})
+        icon_name, label = ACTION_DEFAULT_ICON.get(atype, ("", ""))
+        if icon_name and not kc.icon:
+            for it in assets.load_library():
+                if it["name"] == icon_name:
+                    kc.icon = it["file"]
+                    break
+        if label and not kc.label:
+            kc.label = label
+        self.buttons[index].update_preview(kc)
+        if self.controller.connected:
+            self.controller.render_key(index)
+            try:
+                self.controller.device.refresh()
+            except Exception:
+                pass
+        self._on_key_selected(index)
+        self._queue_save()
+
+    def _build_knobs(self):
+        n = DEVICE_PROFILE.get("dial_count", 0)
+        if n <= 0:
+            return
+        host = QWidget()
+        hb = QHBoxLayout(host)
+        page = self._page()
+        for k in range(1, n + 1):
+            ed = KnobEditor(k, page.knob(k))
+            ed.changed.connect(self._queue_save)
+            hb.addWidget(ed)
+        hb.addStretch()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(host)
+        dock = QDockWidget("Knobs", self)
+        dock.setWidget(scroll)
+        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                         QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
 
     def _on_editor_changed(self):
         if self.selected_index is None:

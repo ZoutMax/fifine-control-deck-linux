@@ -105,6 +105,21 @@ class FifineDeck(StreamDock):
     def set_touchscreen_image(self, path):
         return -1  # this device has no separate touchscreen background
 
+    # -- image-format descriptors (used by the GIF controller) ------------
+    def key_image_format(self):
+        return {
+            "size": (self.KEY_PIXEL_WIDTH, self.KEY_PIXEL_HEIGHT),
+            "format": self.KEY_IMAGE_FORMAT,
+            "rotation": self.KEY_ROTATION,
+            "flip": self.KEY_FLIP,
+        }
+
+    def touchscreen_image_format(self):
+        # No real touchscreen; return a size that never matches a key so the
+        # GIF encoder always uses the key path.
+        return {"size": (800, 480), "format": "JPEG", "rotation": self.KEY_ROTATION,
+                "flip": self.KEY_FLIP}
+
     def set_key_image(self, key, path):
         """Compatibility path-based setter (renders file to key)."""
         from PIL import Image

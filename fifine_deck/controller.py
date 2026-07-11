@@ -15,6 +15,8 @@ import threading
 import time
 from typing import Callable, Optional
 
+import os
+
 from . import actions, rendering
 from .device import FifineDeck, register, DEVICE_PROFILE
 from .model import DeckConfig, Profile, Page, KeyConfig
@@ -32,6 +34,7 @@ class DeckController:
         self._lock = threading.RLock()
         self._listen_thread: Optional[threading.Thread] = None
         self._running = False
+        self._gif_keys: set[int] = set()   # logical keys currently animated
 
         # observer callbacks (optional)
         self.on_connect: Optional[Callable[[FifineDeck], None]] = None
@@ -133,20 +136,49 @@ class DeckController:
         if not dev:
             return
         kc = self.page().keys.get(index, KeyConfig())
-        img = rendering.render_key(
-            dev.KEY_PIXEL_WIDTH, kc.label, kc.icon, kc.bg_color, kc.text_color)
+        is_gif = kc.icon.lower().endswith(".gif") and os.path.exists(kc.icon)
         try:
-            dev.set_key_image_pil(index, img)
+            if is_gif:
+                dev.set_key_gif(index, kc.icon)
+                self._gif_keys.add(index)
+            else:
+                if index in self._gif_keys:
+                    dev.clear_key_gif(index)
+                    self._gif_keys.discard(index)
+                img = rendering.render_key(
+                    dev.KEY_PIXEL_WIDTH, kc.label, kc.icon, kc.bg_color, kc.text_color)
+                dev.set_key_image_pil(index, img)
+            self._sync_gif_loop()
         except Exception as e:
             print(f"[controller] render key {index} failed: {e}", flush=True)
+
+    def _sync_gif_loop(self) -> None:
+        dev = self.device
+        if not dev:
+            return
+        try:
+            if self._gif_keys:
+                dev.start_gif_loop()
+            else:
+                dev.stop_gif_loop()
+        except Exception as e:
+            print(f"[controller] gif loop sync failed: {e}", flush=True)
 
     def render_page(self) -> None:
         dev = self.device
         if not dev:
             return
         with self._lock:
+            # drop animations from the previous page before re-rendering
+            for k in list(self._gif_keys):
+                try:
+                    dev.clear_key_gif(k)
+                except Exception:
+                    pass
+            self._gif_keys.clear()
             for i in range(1, dev.KEY_COUNT + 1):
                 self.render_key(i)
+            self._sync_gif_loop()
             try:
                 dev.refresh()
             except Exception as e:

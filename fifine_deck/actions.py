@@ -75,6 +75,33 @@ ACTION_TYPES: dict[str, dict] = {
 }
 
 
+# Catalog grouping for the drag-and-drop sidebar: (category, [action types]).
+ACTION_CATALOG = [
+    ("Application", ["launch_app", "run_command", "open_url"]),
+    ("Keyboard",    ["hotkey", "text"]),
+    ("Media",       ["media", "volume"]),
+    ("Deck",        ["next_page", "prev_page", "goto_page", "switch_profile", "brightness"]),
+    ("Advanced",    ["multi"]),
+]
+
+# A default library-icon name + label to auto-assign when an action is dropped.
+ACTION_DEFAULT_ICON = {
+    "launch_app": ("home", "App"),
+    "run_command": ("terminal", "Run"),
+    "open_url": ("web", "Web"),
+    "hotkey": ("dot", "Hotkey"),
+    "text": ("dot", "Text"),
+    "media": ("play", "Play"),
+    "volume": ("volume_up", "Volume"),
+    "next_page": ("next_page", "Next"),
+    "prev_page": ("prev_page", "Prev"),
+    "goto_page": ("next_page", "Page"),
+    "switch_profile": ("settings", "Profile"),
+    "brightness": ("brightness_up", "Bright"),
+    "multi": ("star", "Multi"),
+}
+
+
 def _popen_detached(args, shell=False):
     subprocess.Popen(
         args, shell=shell, start_new_session=True,

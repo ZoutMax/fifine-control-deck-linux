@@ -13,14 +13,19 @@ with profiles, multiple pages, a configuration GUI, and a system tray.
 
 ## Features
 
-- Live per-key icons + text labels, colour backgrounds, custom images.
+- Live per-key icons + text labels, colour backgrounds, custom images, and
+  **animated GIF keys**.
+- **Drag-and-drop Actions catalog** — drag an action from the sidebar onto a
+  key (auto-assigns a matching icon + label).
 - Actions: launch app, run shell command, open URL/file, send hotkey, type
   text, media control, volume up/down/mute, brightness, switch page/profile,
   and multi-step actions.
+- **Knob/dial support** (press / rotate-left / rotate-right) on devices that
+  have dials.
 - Multiple **profiles**, each with multiple **pages** (bind a key to
   next/prev/goto-page to build folders).
-- Configuration GUI with a live grid that mirrors the device, plus a system
-  tray; window close minimises to tray, daemon keeps running.
+- Three-pane configuration GUI (actions catalog · live device grid · key
+  settings) with a dark theme matching the original; optional system tray.
 - Optional headless daemon mode + systemd user service for autostart.
 - Hotplug aware (unplug/replug re-applies the current page).
 
