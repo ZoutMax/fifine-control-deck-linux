@@ -45,10 +45,32 @@ class MainWindow(QMainWindow):
         controller.on_disconnect = lambda: self.bridge.disconnected.emit()
         controller.on_key_event = lambda i, p: self.bridge.keyEvent.emit(i, p)
 
+        self._close_notified = False
         self._build_ui()
+        self._build_menu()
         self._build_tray()
         self._reload_profiles()
         self._rebuild_grid()
+
+    def _build_menu(self):
+        m = self.menuBar().addMenu("&App")
+        hide_act = QAction("Hide to background", self)
+        hide_act.setShortcut("Ctrl+W")
+        hide_act.triggered.connect(self.close)
+        show_min = QAction("Show / Raise window", self)
+        show_min.triggered.connect(self.show_and_raise)
+        quit_act = QAction("Quit", self)
+        quit_act.setShortcut("Ctrl+Q")
+        quit_act.triggered.connect(self._quit)
+        m.addAction(hide_act)
+        m.addAction(show_min)
+        m.addSeparator()
+        m.addAction(quit_act)
+
+    def show_and_raise(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
 
     # -- UI construction ---------------------------------------------------
     def _build_ui(self):
@@ -423,15 +445,22 @@ class MainWindow(QMainWindow):
             self.activateWindow()
 
     def closeEvent(self, e):
-        # Minimize to tray if one exists; otherwise quit normally.
+        # Closing never quits: the deck keeps working in the background.
+        # A tray (if present) or relaunching the command reopens the window.
+        self.hide()
+        e.ignore()
         if self.tray is not None and self.tray.isVisible():
-            self.hide()
             self.tray.showMessage("fifine Control Deck",
                                   "Still running in the tray. Right-click to quit.",
                                   self._app_icon(), 3000)
-            e.ignore()
-        else:
-            self._quit()
+        elif not self._close_notified:
+            self._close_notified = True
+            QMessageBox.information(
+                self, "Running in the background",
+                "fifine Control Deck keeps running so your keys stay active.\n\n"
+                "• Re-open this window: launch “fifine Control Deck” again "
+                "(or run 'fifine-control-deck').\n"
+                "• Quit completely: App → Quit  (Ctrl+Q).")
 
     def _quit(self):
         self.config.save()

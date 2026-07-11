@@ -65,4 +65,8 @@ QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
 QToolTip {{ background: {PANEL2}; color: {TEXT}; border: 1px solid {ACCENT}; }}
 QMenu {{ background: {PANEL2}; color: {TEXT}; border: 1px solid {BORDER}; }}
 QMenu::item:selected {{ background: {ACCENT}; }}
+QMenuBar {{ background: {PANEL}; color: {TEXT}; border-bottom: 1px solid {BORDER}; }}
+QMenuBar::item {{ background: transparent; padding: 5px 10px; }}
+QMenuBar::item:selected {{ background: {ACCENT}; border-radius: 4px; }}
+QMessageBox {{ background: {BG}; }}
 """
