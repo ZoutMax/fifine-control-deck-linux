@@ -16,7 +16,7 @@ from ..device import DEVICE_PROFILE
 from ..model import DeckConfig, Profile, Page, KeyConfig, Action
 from ..actions import default_icon_for
 from ..controller import DeckController
-from .widgets import KeyButton, ActionEditor, ActionCatalog, KnobEditor
+from .widgets import KeyButton, ActionEditor, ActionCatalog, KnobEditor, ReorderDialog
 
 
 class _Bridge(QObject):
@@ -35,7 +35,7 @@ class MainWindow(QMainWindow):
         self.buttons: dict[int, KeyButton] = {}
         self.selected_index: int | None = None
 
-        self.setWindowTitle("fifine Control Deck — Linux")
+        self.setWindowTitle("fifine Control Deck")
         self.resize(1000, 620)
 
         # Let action editors offer a profile dropdown for the "switch profile" action.
@@ -107,10 +107,13 @@ class MainWindow(QMainWindow):
         self.profile_combo = QComboBox()
         self.profile_combo.currentIndexChanged.connect(self._on_profile_selected)
         bar.addWidget(self.profile_combo)
-        for text, slot in [("+", self._add_profile), ("Rename", self._rename_profile),
-                           ("–", self._del_profile)]:
+        for text, slot, tip in [("+", self._add_profile, "Add profile"),
+                                ("Rename", self._rename_profile, "Rename profile"),
+                                ("⇅", self._reorder_profiles, "Reorder profiles"),
+                                ("–", self._del_profile, "Delete profile")]:
             b = QPushButton(text)
             b.setFixedWidth(70 if len(text) > 1 else 32)
+            b.setToolTip(tip)
             b.clicked.connect(slot)
             bar.addWidget(b)
 
@@ -119,9 +122,12 @@ class MainWindow(QMainWindow):
         self.page_combo = QComboBox()
         self.page_combo.currentIndexChanged.connect(self._on_page_selected)
         bar.addWidget(self.page_combo)
-        for text, slot in [("+", self._add_page), ("–", self._del_page)]:
+        for text, slot, tip in [("+", self._add_page, "Add page"),
+                                ("⇅", self._reorder_pages, "Reorder pages"),
+                                ("–", self._del_page, "Delete page")]:
             b = QPushButton(text)
             b.setFixedWidth(32)
+            b.setToolTip(tip)
             b.clicked.connect(slot)
             bar.addWidget(b)
 
@@ -366,6 +372,40 @@ class MainWindow(QMainWindow):
         self._reload_pages()
         self._refresh_all_previews()
         self.controller.render_page()
+        self._queue_save()
+
+    def _reorder_pages(self):
+        prof = self._profile()
+        if len(prof.pages) < 2:
+            return
+        labels = [self.page_combo.itemText(i) for i in range(self.page_combo.count())]
+        dlg = ReorderDialog("Reorder pages", labels, self)
+        if not dlg.exec():
+            return
+        order = dlg.order()
+        if order == list(range(len(prof.pages))):
+            return
+        current_id = prof.pages[self.controller.page_index].id
+        prof.pages = [prof.pages[i] for i in order]
+        self.controller.page_index = next(
+            (i for i, p in enumerate(prof.pages) if p.id == current_id), 0)
+        self._reload_pages()
+        self._refresh_all_previews()
+        self.controller.render_page()
+        self._queue_save()
+
+    def _reorder_profiles(self):
+        if len(self.config.profiles) < 2:
+            return
+        labels = [p.name for p in self.config.profiles]
+        dlg = ReorderDialog("Reorder profiles", labels, self)
+        if not dlg.exec():
+            return
+        order = dlg.order()
+        if order == list(range(len(self.config.profiles))):
+            return
+        self.config.profiles = [self.config.profiles[i] for i in order]
+        self._reload_profiles()   # active profile tracked by id, stays selected
         self._queue_save()
 
     # -- editing -----------------------------------------------------------

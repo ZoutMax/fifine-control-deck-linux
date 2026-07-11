@@ -66,6 +66,38 @@ class IconLibraryDialog(QDialog):
         self.accept()
 
 
+class ReorderDialog(QDialog):
+    """Drag the rows to reorder them. `order()` returns the new arrangement as
+    a list of the original indices."""
+    def __init__(self, title: str, labels: list[str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(320, 360)
+        v = QVBoxLayout(self)
+        hint = QLabel("Drag items to reorder, then OK.")
+        hint.setStyleSheet("color:#9a9a9a;")
+        v.addWidget(hint)
+        self.list = QListWidget()
+        self.list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        for i, lbl in enumerate(labels):
+            it = QListWidgetItem(lbl)
+            it.setData(Qt.ItemDataRole.UserRole, i)
+            self.list.addItem(it)
+        v.addWidget(self.list)
+        row = QHBoxLayout()
+        row.addStretch()
+        cancel = QPushButton("Cancel"); cancel.clicked.connect(self.reject)
+        ok = QPushButton("OK"); ok.clicked.connect(self.accept)
+        row.addWidget(cancel); row.addWidget(ok)
+        v.addLayout(row)
+
+    def order(self) -> list[int]:
+        return [self.list.item(r).data(Qt.ItemDataRole.UserRole)
+                for r in range(self.list.count())]
+
+
 # ---------------------------------------------------------------------------
 # Key button (grid cell) — selectable + accepts dropped actions
 # ---------------------------------------------------------------------------

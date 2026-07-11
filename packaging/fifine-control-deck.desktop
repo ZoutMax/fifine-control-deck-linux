@@ -10,4 +10,4 @@ Terminal=false
 Categories=Utility;
 Keywords=streamdeck;macro;keypad;fifine;streamdock;hotkey;
 StartupNotify=true
-StartupWMClass=fifine Control Deck
+StartupWMClass=fifine-control-deck
