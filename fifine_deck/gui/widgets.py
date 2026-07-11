@@ -247,12 +247,19 @@ class ActionEditor(QWidget):
     def __init__(self):
         super().__init__()
         self._kc: KeyConfig | None = None
+        self._index: int | None = None
         self._building = False
 
         root = QVBoxLayout(self)
+        header = QHBoxLayout()
         self.title = QLabel("No key selected")
         self.title.setStyleSheet("font-weight:bold;font-size:14px;")
-        root.addWidget(self.title)
+        header.addWidget(self.title)
+        header.addStretch()
+        self.clear_btn = QPushButton("Clear key")
+        self.clear_btn.clicked.connect(self._clear_key)
+        header.addWidget(self.clear_btn)
+        root.addLayout(header)
 
         form = QFormLayout()
         self.label_edit = QLineEdit()
@@ -292,6 +299,7 @@ class ActionEditor(QWidget):
     def set_key(self, kc: KeyConfig, index: int):
         self._building = True
         self._kc = kc
+        self._index = index
         self.setEnabled(True)
         self.title.setText(f"Key {index}")
         self.label_edit.setText(kc.label)
@@ -303,8 +311,22 @@ class ActionEditor(QWidget):
 
     def clear(self):
         self._kc = None
+        self._index = None
         self.setEnabled(False)
         self.title.setText("No key selected")
+
+    def _clear_key(self):
+        """Reset the selected key to empty (label, icon, colours, action)."""
+        if self._kc is None or self._index is None:
+            return
+        default = KeyConfig()
+        self._kc.label = default.label
+        self._kc.icon = default.icon
+        self._kc.bg_color = default.bg_color
+        self._kc.text_color = default.text_color
+        self._kc.action = Action()
+        self.set_key(self._kc, self._index)   # refresh the editor fields
+        self.changed.emit()
 
     def _browse_icon(self):
         path, _ = QFileDialog.getOpenFileName(
