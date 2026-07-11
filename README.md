@@ -1,4 +1,4 @@
-# fifine Control Deck — Linux
+# Fifine Control Deck — Linux
 
 A native Linux control application for the **fifine Control Deck** (a Mirabox /
 Hotspot "Stream Dock" style macro keypad with per-key LCDs, USB id
