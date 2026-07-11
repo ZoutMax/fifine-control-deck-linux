@@ -5,6 +5,8 @@ __pycache__/
 *.tmp
 .venv/
 build/
+*.snap
+/parts/ /stage/ /prime/
 # Ignore built packages except the stable-named "latest" ones we ship in-repo.
 dist/*
 !dist/fifine-control-deck_latest_amd64.deb

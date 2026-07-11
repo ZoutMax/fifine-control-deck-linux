@@ -38,6 +38,13 @@ snapcraft upload --release=edge ./fifine-control-deck_*.snap
 
 Once on `stable`, it appears in the Ubuntu **App Center** / Snap Store.
 
+## Build result (verified)
+
+The strict snap **builds and runs**, and on a machine that already has the
+udev rule installed it **successfully opened the device** (firmware read OK)
+with `raw-usb` + `hardware-observe` connected. So strict confinement is viable
+here — see the permission caveat below for clean installs.
+
 ## ⚠️ Device access — the one real constraint
 
 The deck is driven through **`/dev/hidraw*`** (the bundled `libtransport.so`

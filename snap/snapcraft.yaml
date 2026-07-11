@@ -1,6 +1,12 @@
 name: fifine-control-deck
 base: core24
 version: '0.5.2'
+title: fifine Control Deck
+license: MIT
+contact: https://github.com/ZoutMax/fifine-control-deck-linux/issues
+issues: https://github.com/ZoutMax/fifine-control-deck-linux/issues
+source-code: https://github.com/ZoutMax/fifine-control-deck-linux
+website: https://github.com/ZoutMax/fifine-control-deck-linux
 summary: Control app for fifine / Stream Dock macro keypads
 description: |
   A native Linux control application for the fifine Control Deck (a
