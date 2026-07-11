@@ -92,26 +92,26 @@ def render_key(
 
 
 def _apply_glow(img: Image.Image) -> Image.Image:
-    """Pressed-key feedback: a bright glowing halo hugging the button border."""
+    """Pressed-key feedback: a symmetric glowing halo around the button border.
+    The key content is left as-is; a soft blurred ring plus a crisp bright edge
+    hug the border evenly on all sides."""
     size = img.width
-    # a touch brighter so the key reads as 'lit', but the halo is the effect
-    out = ImageEnhance.Brightness(img.convert("RGB")).enhance(1.12).convert("RGBA")
-    rad = int(size * 0.16)
-    inset = int(size * 0.05)
-    box = [inset, inset, size - 1 - inset, size - 1 - inset]
+    m = max(2, int(size * 0.03))               # equal margin on all sides
+    rad = int(size * 0.14)
+    box = [m, m, size - 1 - m, size - 1 - m]
+    out = img.convert("RGBA")
 
-    # 1) wide soft halo blurred around the border
-    halo = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ImageDraw.Draw(halo).rounded_rectangle(
-        box, radius=rad, outline=(90, 200, 255, 255), width=max(3, int(size * 0.10)))
-    halo = halo.filter(ImageFilter.GaussianBlur(max(2, int(size * 0.06))))
-    out = Image.alpha_composite(out, halo)
+    # soft, evenly-blurred halo following the border
+    glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).rounded_rectangle(
+        box, radius=rad, outline=(80, 200, 255, 255), width=max(4, int(size * 0.07)))
+    glow = glow.filter(ImageFilter.GaussianBlur(max(2, int(size * 0.045))))
+    out = Image.alpha_composite(out, glow)
 
-    # 2) crisp bright ring on top for a defined halo edge
+    # crisp bright ring for a defined halo edge
     ring = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     ImageDraw.Draw(ring).rounded_rectangle(
-        box, radius=rad, outline=(210, 240, 255, 235), width=max(2, int(size * 0.028)))
-    ring = ring.filter(ImageFilter.GaussianBlur(max(1, int(size * 0.012))))
+        box, radius=rad, outline=(210, 240, 255, 255), width=max(1, int(size * 0.02)))
     out = Image.alpha_composite(out, ring)
     return out.convert("RGB")
 
