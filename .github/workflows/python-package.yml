@@ -2,39 +2,55 @@
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
 
 name: Python package
+     
+      on:
+        push:
+          branches: [ main ]
+        pull_request:
+          branches: [ main ]
 
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+      jobs:
+        build:
+          runs-on: ubuntu-latest
+          strategy:
+            fail-fast: false
+            matrix:
+              # PyQt6 wheels aren't published for 3.14 yet; test 3.10–3.13.
+              python-version: ["3.10", "3.11", "3.12", "3.13"]
 
-jobs:
-  build:
+          steps:
+            - uses: actions/checkout@v4
 
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+            - name: Set up Python ${{ matrix.python-version }}
+              uses: actions/setup-python@v5
+              with:
+                python-version: ${{ matrix.python-version }}
 
-    steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
-      with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install flake8 pytest
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - name: Lint with flake8
-      run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    - name: Test with pytest
-      run: |
-        pytest
+            - name: Install system libraries (Qt + libudev for the transport .so)
+              run: |
+                sudo apt-get update
+                sudo apt-get install -y \
+                  libegl1 libgl1 libxkbcommon0 libdbus-1-3 \
+                  libudev1 '^libxcb.*-dev' libx11-xcb1 \
+                  libglib2.0-0 libfontconfig1 libfreetype6
+
+            - name: Install Python dependencies
+              run: |
+                python -m pip install --upgrade pip
+                pip install PyQt6 Pillow pyudev flake8
+                # If you add a requirements file / tests later:
+                # pip install -r requirements.txt pytest
+
+            - name: Lint with flake8
+              run: |
+                # Fail on real errors (syntax, undefined names); exclude the vendored SDK.
+                flake8 fifine_deck --exclude=fifine_deck/backend \
+                  --count --select=E9,F63,F7,F82 --show-source --statistics
+                # Style pass is advisory only.
+                flake8 fifine_deck --exclude=fifine_deck/backend \
+                  --count --exit-zero --max-line-length=100 --statistics
+
+            - name: Smoke test (offscreen)
+              env:
+                QT_QPA_PLATFORM: offscreen
+                QT_LOGGING_RULES: "*=false"
