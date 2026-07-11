@@ -78,23 +78,18 @@ def g_speaker(d, s, waves=1, badge=None):
             d.line([bx, by - L, bx, by + L], fill=WHITE, width=w)
 
 
-def g_vol(d, s, badge, waves):
-    """Speaker on the left, prominent +/- on the right; wave count differs so
-    volume-up and volume-down read as clearly distinct icons."""
-    cx, cy = s * 0.30, s * 0.5
-    bw, bh = s * 0.10, s * 0.14
+def g_vol(d, s, waves):
+    """Speaker with `waves` sound arcs. Volume-up draws more waves, volume-down
+    fewer — the wave count alone distinguishes them (no +/- sign)."""
+    cx, cy = s * 0.34, s * 0.5
+    bw, bh = s * 0.11, s * 0.16
     d.rectangle([cx - bw, cy - bh * 0.6, cx, cy + bh * 0.6], fill=WHITE)
-    d.polygon([(cx, cy - bh * 0.6), (cx + s * 0.13, cy - bh * 1.25),
-               (cx + s * 0.13, cy + bh * 1.25), (cx, cy + bh * 0.6)], fill=WHITE)
+    d.polygon([(cx, cy - bh * 0.6), (cx + s * 0.15, cy - bh * 1.25),
+               (cx + s * 0.15, cy + bh * 1.25), (cx, cy + bh * 0.6)], fill=WHITE)
     for i in range(waves):
-        rr = s * (0.12 + i * 0.075)
-        bbox = [cx + s * 0.15 - rr, cy - rr, cx + s * 0.15 + rr, cy + rr]
-        d.arc(bbox, -50, 50, fill=WHITE, width=int(s * 0.03))
-    # large, unmistakable +/- badge on the right
-    bx, by, L, w = s * 0.74, s * 0.5, s * 0.13, int(s * 0.085)
-    d.line([bx - L, by, bx + L, by], fill=WHITE, width=w)
-    if badge == "+":
-        d.line([bx, by - L, bx, by + L], fill=WHITE, width=w)
+        rr = s * (0.13 + i * 0.085)
+        bbox = [cx + s * 0.17 - rr, cy - rr, cx + s * 0.17 + rr, cy + rr]
+        d.arc(bbox, -55, 55, fill=WHITE, width=int(s * 0.036))
 
 
 def g_play(d, s):
@@ -252,8 +247,8 @@ BG_NAV = ACCENT
 BG_APP = (60, 40, 90)
 
 LIBRARY = [
-    ("volume_up",   "Volume +",  BG_AUDIO, lambda d, s: g_vol(d, s, "+", 2), "Audio"),
-    ("volume_down", "Volume −",  (18, 34, 70), lambda d, s: g_vol(d, s, "-", 1), "Audio"),
+    ("volume_up",   "Volume +",  BG_AUDIO, lambda d, s: g_vol(d, s, 3), "Audio"),
+    ("volume_down", "Volume −",  (18, 34, 70), lambda d, s: g_vol(d, s, 1), "Audio"),
     ("mute",        "Mute",      (90, 30, 30), lambda d, s: g_speaker(d, s, 0, "x"), "Audio"),
     ("play",        "Play",      BG_MEDIA, g_play, "Media"),
     ("pause",       "Pause",     BG_MEDIA, g_pause, "Media"),
