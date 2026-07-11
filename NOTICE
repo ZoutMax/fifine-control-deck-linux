@@ -1,0 +1,19 @@
+fifine Control Deck — Linux
+===========================
+
+Original application code (fifine_deck/, packaging/, probe_device.py,
+test_keys.py) is authored for this project.
+
+Bundled third-party component
+-----------------------------
+fifine_deck/backend/StreamDock/  — the StreamDock Device SDK by MiraBox
+(https://github.com/MiraboxSpace/StreamDock-Device-SDK), MIT licensed.
+This includes the precompiled USB transport library
+(Transport/TransportDLL/libtransport*.so / .dll / .dylib). See
+fifine_deck/backend/StreamDock/LICENSE.vendor for its MIT license text.
+
+Protocol understanding was informed by the reverse-engineering demo
+rigor789/mirabox-streamdock-node (MIT) and 4ndv/mirajazz.
+
+This project is not affiliated with or endorsed by fifine, Hotspot/Mirabox,
+or Elgato.

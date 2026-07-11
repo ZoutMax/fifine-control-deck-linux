@@ -1,0 +1,346 @@
+"""Main window: key grid + editor + profile/page controls + tray."""
+from __future__ import annotations
+
+import functools
+
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
+from PyQt6.QtGui import QAction, QIcon, QPixmap
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QGridLayout, QVBoxLayout, QHBoxLayout, QLabel,
+    QComboBox, QPushButton, QSlider, QInputDialog, QMessageBox, QDockWidget,
+    QSystemTrayIcon, QMenu, QStatusBar,
+)
+
+from .. import rendering
+from ..device import DEVICE_PROFILE
+from ..model import DeckConfig, Profile, Page, KeyConfig
+from ..controller import DeckController
+from .widgets import KeyButton, ActionEditor
+
+
+class _Bridge(QObject):
+    """Marshals controller callbacks (background threads) onto the GUI thread."""
+    connected = pyqtSignal()
+    disconnected = pyqtSignal()
+    keyEvent = pyqtSignal(int, bool)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, config: DeckConfig, controller: DeckController):
+        super().__init__()
+        self.config = config
+        self.controller = controller
+        self.buttons: dict[int, KeyButton] = {}
+        self.selected_index: int | None = None
+
+        self.setWindowTitle("fifine Control Deck — Linux")
+        self.resize(1000, 620)
+
+        self.bridge = _Bridge()
+        self.bridge.connected.connect(self._on_connected)
+        self.bridge.disconnected.connect(self._on_disconnected)
+        self.bridge.keyEvent.connect(self._on_key_event)
+        controller.on_connect = lambda dev: self.bridge.connected.emit()
+        controller.on_disconnect = lambda: self.bridge.disconnected.emit()
+        controller.on_key_event = lambda i, p: self.bridge.keyEvent.emit(i, p)
+
+        self._build_ui()
+        self._build_tray()
+        self._reload_profiles()
+        self._rebuild_grid()
+
+    # -- UI construction ---------------------------------------------------
+    def _build_ui(self):
+        central = QWidget()
+        root = QVBoxLayout(central)
+
+        # top bar
+        bar = QHBoxLayout()
+        bar.addWidget(QLabel("Profile:"))
+        self.profile_combo = QComboBox()
+        self.profile_combo.currentIndexChanged.connect(self._on_profile_selected)
+        bar.addWidget(self.profile_combo)
+        for text, slot in [("+", self._add_profile), ("Rename", self._rename_profile),
+                           ("–", self._del_profile)]:
+            b = QPushButton(text)
+            b.setFixedWidth(70 if len(text) > 1 else 32)
+            b.clicked.connect(slot)
+            bar.addWidget(b)
+
+        bar.addSpacing(20)
+        bar.addWidget(QLabel("Page:"))
+        self.page_combo = QComboBox()
+        self.page_combo.currentIndexChanged.connect(self._on_page_selected)
+        bar.addWidget(self.page_combo)
+        for text, slot in [("+", self._add_page), ("–", self._del_page)]:
+            b = QPushButton(text)
+            b.setFixedWidth(32)
+            b.clicked.connect(slot)
+            bar.addWidget(b)
+
+        bar.addStretch()
+        bar.addWidget(QLabel("Brightness"))
+        self.bright = QSlider(Qt.Orientation.Horizontal)
+        self.bright.setFixedWidth(150)
+        self.bright.setRange(0, 100)
+        self.bright.setValue(config_brightness(self.config))
+        self.bright.valueChanged.connect(self._on_brightness)
+        bar.addWidget(self.bright)
+        root.addLayout(bar)
+
+        # key grid
+        self.grid_host = QWidget()
+        self.grid = QGridLayout(self.grid_host)
+        self.grid.setSpacing(10)
+        self.grid.setContentsMargins(20, 20, 20, 20)
+        root.addWidget(self.grid_host, 1)
+
+        self.setCentralWidget(central)
+
+        # editor dock
+        self.editor = ActionEditor()
+        self.editor.changed.connect(self._on_editor_changed)
+        dock = QDockWidget("Key settings", self)
+        dock.setWidget(self.editor)
+        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                         QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+        dock.setMinimumWidth(320)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+
+        self.setStatusBar(QStatusBar())
+        self._set_status()
+
+        # save periodically + on change
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(600)
+        self._save_timer.timeout.connect(lambda: self.config.save())
+
+    def _build_tray(self):
+        icon = self._app_icon()
+        self.setWindowIcon(icon)
+        # Some Wayland compositors have no StatusNotifier host; don't create a
+        # tray icon there (closing would otherwise hide the window with no way
+        # to restore it).
+        self.tray = None
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        self.tray = QSystemTrayIcon(icon, self)
+        menu = QMenu()
+        show = QAction("Show / Hide", self)
+        show.triggered.connect(self._toggle_visible)
+        quit_a = QAction("Quit", self)
+        quit_a.triggered.connect(self._quit)
+        menu.addAction(show)
+        menu.addSeparator()
+        menu.addAction(quit_a)
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(
+            lambda r: self._toggle_visible()
+            if r == QSystemTrayIcon.ActivationReason.Trigger else None)
+        self.tray.setToolTip("fifine Control Deck")
+        self.tray.show()
+
+    def _app_icon(self) -> QIcon:
+        img = rendering.render_key(64, "fC", "", "#00c8ff", "#001018")
+        return QIcon(QPixmap.fromImage(rendering.pil_to_qimage(img)))
+
+    # -- grid --------------------------------------------------------------
+    def _rebuild_grid(self):
+        while self.grid.count():
+            item = self.grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.buttons = {}
+        cols = DEVICE_PROFILE["cols"]
+        count = DEVICE_PROFILE["key_count"]
+        for idx in range(1, count + 1):
+            r, c = divmod(idx - 1, cols)
+            btn = KeyButton(idx)
+            btn.selected.connect(self._on_key_selected)
+            self.grid.addWidget(btn, r, c)
+            self.buttons[idx] = btn
+        self._refresh_all_previews()
+
+    def _refresh_all_previews(self):
+        page = self._page()
+        for idx, btn in self.buttons.items():
+            btn.update_preview(page.keys.get(idx, KeyConfig()))
+
+    # -- model helpers -----------------------------------------------------
+    def _profile(self) -> Profile:
+        return self.config.active_profile()
+
+    def _page(self) -> Page:
+        pages = self._profile().pages
+        i = min(self.controller.page_index, len(pages) - 1)
+        return pages[i]
+
+    # -- profile / page combo handling ------------------------------------
+    def _reload_profiles(self):
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        for p in self.config.profiles:
+            self.profile_combo.addItem(p.name, p.id)
+        i = self.profile_combo.findData(self.config.active_profile_id)
+        self.profile_combo.setCurrentIndex(max(0, i))
+        self.profile_combo.blockSignals(False)
+        self._reload_pages()
+
+    def _reload_pages(self):
+        self.page_combo.blockSignals(True)
+        self.page_combo.clear()
+        for n, pg in enumerate(self._profile().pages):
+            self.page_combo.addItem(pg.name or f"Page {n+1}", pg.id)
+        self.page_combo.setCurrentIndex(min(self.controller.page_index,
+                                            self.page_combo.count() - 1))
+        self.page_combo.blockSignals(False)
+
+    def _on_profile_selected(self, i):
+        pid = self.profile_combo.itemData(i)
+        if pid:
+            self.config.active_profile_id = pid
+            self.controller.page_index = 0
+            self._reload_pages()
+            self._refresh_all_previews()
+            self.controller.render_page()
+            self._queue_save()
+
+    def _on_page_selected(self, i):
+        if i < 0:
+            return
+        self.controller.page_index = i
+        self._refresh_all_previews()
+        self.controller.render_page()
+        self.editor.clear()
+
+    def _add_profile(self):
+        name, ok = QInputDialog.getText(self, "New profile", "Name:")
+        if ok and name:
+            p = Profile(name=name)
+            self.config.profiles.append(p)
+            self.config.active_profile_id = p.id
+            self.controller.page_index = 0
+            self._reload_profiles()
+            self._refresh_all_previews()
+            self._queue_save()
+
+    def _rename_profile(self):
+        p = self._profile()
+        name, ok = QInputDialog.getText(self, "Rename profile", "Name:", text=p.name)
+        if ok and name:
+            p.name = name
+            self._reload_profiles()
+            self._queue_save()
+
+    def _del_profile(self):
+        if len(self.config.profiles) <= 1:
+            QMessageBox.information(self, "Delete profile", "At least one profile is required.")
+            return
+        p = self._profile()
+        if QMessageBox.question(self, "Delete profile", f"Delete '{p.name}'?") \
+                == QMessageBox.StandardButton.Yes:
+            self.config.profiles.remove(p)
+            self.config.active_profile_id = self.config.profiles[0].id
+            self.controller.page_index = 0
+            self._reload_profiles()
+            self._refresh_all_previews()
+            self.controller.render_page()
+            self._queue_save()
+
+    def _add_page(self):
+        self._profile().pages.append(Page(name=f"Page {len(self._profile().pages)+1}"))
+        self._reload_pages()
+        self._queue_save()
+
+    def _del_page(self):
+        prof = self._profile()
+        if len(prof.pages) <= 1:
+            QMessageBox.information(self, "Delete page", "At least one page is required.")
+            return
+        del prof.pages[self.controller.page_index]
+        self.controller.page_index = 0
+        self._reload_pages()
+        self._refresh_all_previews()
+        self.controller.render_page()
+        self._queue_save()
+
+    # -- editing -----------------------------------------------------------
+    def _on_key_selected(self, index: int):
+        self.selected_index = index
+        for i, b in self.buttons.items():
+            b.setChecked(i == index)
+        kc = self._page().key(index)
+        self.editor.set_key(kc, index)
+
+    def _on_editor_changed(self):
+        if self.selected_index is None:
+            return
+        idx = self.selected_index
+        self.buttons[idx].update_preview(self._page().key(idx))
+        if self.controller.connected:
+            self.controller.render_key(idx)
+            try:
+                self.controller.device.refresh()
+            except Exception:
+                pass
+        self._queue_save()
+
+    def _on_brightness(self, v):
+        self.controller.set_brightness(v)
+        self._queue_save()
+
+    # -- controller callbacks (GUI thread via bridge) ---------------------
+    def _on_connected(self):
+        self._set_status()
+        self.bright.setValue(self.config.brightness)
+        self.controller.render_page()
+
+    def _on_disconnected(self):
+        self._set_status()
+
+    def _on_key_event(self, index: int, pressed: bool):
+        b = self.buttons.get(index)
+        if b:
+            b.flash(pressed)
+
+    def _set_status(self):
+        from ..actions import environment_summary
+        state = "● connected" if self.controller.connected else "○ no device"
+        fw = ""
+        if self.controller.connected and self.controller.device:
+            fw = f"  fw={self.controller.device.firmware_version}"
+        self.statusBar().showMessage(f"{state}{fw}   |   {environment_summary()}")
+
+    # -- misc --------------------------------------------------------------
+    def _queue_save(self):
+        self._save_timer.start()
+
+    def _toggle_visible(self):
+        if self.isVisible():
+            self.hide()
+        else:
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+
+    def closeEvent(self, e):
+        # Minimize to tray if one exists; otherwise quit normally.
+        if self.tray is not None and self.tray.isVisible():
+            self.hide()
+            self.tray.showMessage("fifine Control Deck",
+                                  "Still running in the tray. Right-click to quit.",
+                                  self._app_icon(), 3000)
+            e.ignore()
+        else:
+            self._quit()
+
+    def _quit(self):
+        self.config.save()
+        self.controller.stop()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.quit()
+
+
+def config_brightness(cfg: DeckConfig) -> int:
+    return int(cfg.brightness)

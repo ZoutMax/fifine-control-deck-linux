@@ -1,0 +1,12 @@
+# fifine Control Deck for Linux — USB permissions
+# Grants members of the "plugdev" group read/write access to the
+# fifine / Hotspot Stream Dock control device without root.
+#
+# Install:
+#   sudo cp 99-fifine-deck.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# Then unplug/replug the device.
+
+# fifine Control Deck (HOTSPOTEKUSB) — VID 0x3142
+SUBSYSTEM=="usb", ATTR{idVendor}=="3142", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="3142", MODE="0660", GROUP="plugdev", TAG+="uaccess"

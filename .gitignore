@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.swp
+*.tmp
+.venv/
+build/
+dist/
+*.egg-info/
+# local runtime artifacts
+/tmp/
+rotated_*_image_*.jpg
