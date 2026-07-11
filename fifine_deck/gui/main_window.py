@@ -79,8 +79,17 @@ class MainWindow(QMainWindow):
         self.autostart_act.setChecked(_os.path.exists(AUTOSTART_FILE))
         self.autostart_act.toggled.connect(lambda on: set_autostart(on))
         m.addAction(self.autostart_act)
+        # Glow-on-press toggle
+        self.glow_act = QAction("Glow keys on press", self, checkable=True)
+        self.glow_act.setChecked(bool(self.config.glow))
+        self.glow_act.toggled.connect(self._set_glow)
+        m.addAction(self.glow_act)
         m.addSeparator()
         m.addAction(quit_act)
+
+    def _set_glow(self, on: bool):
+        self.config.glow = bool(on)
+        self._queue_save()
 
     def show_and_raise(self):
         self.showNormal()

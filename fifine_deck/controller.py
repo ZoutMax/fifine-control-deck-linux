@@ -221,12 +221,32 @@ class DeckController:
             except Exception as e:   # never let the worker die
                 print(f"[controller] action worker error: {e}", flush=True)
 
+    def flash_key(self, index: int, pressed: bool) -> None:
+        """Glow a key on the device while pressed; restore it on release.
+        Skips animated (GIF) keys, which the GIF loop keeps repainting."""
+        if not self.config.glow:
+            return
+        with self._lock:
+            dev = self.device
+            if not dev or index in self._gif_keys:
+                return
+            kc = self.page().keys.get(index, KeyConfig())
+            try:
+                img = rendering.render_key(
+                    dev.KEY_PIXEL_WIDTH, kc.label, kc.icon, kc.bg_color,
+                    kc.text_color, pressed=pressed)
+                dev.set_key_image_pil(index, img)
+                dev.refresh()
+            except Exception as e:
+                print(f"[controller] flash key {index} failed: {e}", flush=True)
+
     def _key_callback(self, device, event):
         if event.event_type == EventType.BUTTON:
             index = int(event.key.value)
             pressed = event.state == 1
             if self.on_key_event:
                 self.on_key_event(index, pressed)
+            self.flash_key(index, pressed)
             if pressed:
                 kc = self.page().keys.get(index)
                 if kc:

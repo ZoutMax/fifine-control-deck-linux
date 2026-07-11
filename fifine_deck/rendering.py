@@ -9,7 +9,7 @@ import io
 import os
 from functools import lru_cache
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 
 _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -45,8 +45,10 @@ def render_key(
     icon_path: str = "",
     bg_color: str = "#101020",
     text_color: str = "#ffffff",
+    pressed: bool = False,
 ) -> Image.Image:
-    """Return an RGB PIL image (size x size), upright (no device rotation yet)."""
+    """Return an RGB PIL image (size x size), upright (no device rotation yet).
+    If pressed, apply a glow (brighten + soft border) for on-device feedback."""
     img = Image.new("RGB", (size, size), _hex(bg_color))
 
     if icon_path and os.path.exists(icon_path):
@@ -84,7 +86,23 @@ def render_key(
             draw.text((x + 1, y + 1), line, font=font, fill=(0, 0, 0))
             draw.text((x, y), line, font=font, fill=tcol)
 
+    if pressed:
+        img = _apply_glow(img)
     return img
+
+
+def _apply_glow(img: Image.Image) -> Image.Image:
+    """Pressed-key feedback: brighten and add a soft glowing border."""
+    size = img.width
+    lit = ImageEnhance.Brightness(img.convert("RGB")).enhance(1.4)
+    glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    b = max(3, int(size * 0.07))
+    gd.rounded_rectangle([b // 2, b // 2, size - 1 - b // 2, size - 1 - b // 2],
+                         radius=int(size * 0.14), outline=(120, 205, 255, 255), width=b)
+    glow = glow.filter(ImageFilter.GaussianBlur(max(2, int(size * 0.05))))
+    out = Image.alpha_composite(lit.convert("RGBA"), glow)
+    return out.convert("RGB")
 
 
 def _wrap(draw, text, font, max_w):
