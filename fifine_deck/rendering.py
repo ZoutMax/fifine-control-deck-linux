@@ -92,27 +92,26 @@ def render_key(
 
 
 def _apply_glow(img: Image.Image) -> Image.Image:
-    """Pressed-key feedback: a symmetric glowing halo around the button border.
-    The key content is left as-is; a soft blurred ring plus a crisp bright edge
-    hug the border evenly on all sides."""
+    """Pressed-key feedback: a glowing line tracing the button's outline, so the
+    button looks encircled by a lit halo. Key content is left as-is."""
     size = img.width
-    m = max(2, int(size * 0.03))               # equal margin on all sides
-    rad = int(size * 0.14)
+    m = max(1, int(size * 0.02))               # line sits right at the edge
+    rad = int(size * 0.16)
     box = [m, m, size - 1 - m, size - 1 - m]
     out = img.convert("RGBA")
 
-    # soft, evenly-blurred halo following the border
-    glow = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ImageDraw.Draw(glow).rounded_rectangle(
-        box, radius=rad, outline=(80, 200, 255, 255), width=max(4, int(size * 0.07)))
-    glow = glow.filter(ImageFilter.GaussianBlur(max(2, int(size * 0.045))))
-    out = Image.alpha_composite(out, glow)
+    # soft bloom behind the line so it reads as a glow, not a plain border
+    bloom = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ImageDraw.Draw(bloom).rounded_rectangle(
+        box, radius=rad, outline=(70, 195, 255, 255), width=max(3, int(size * 0.045)))
+    bloom = bloom.filter(ImageFilter.GaussianBlur(max(2, int(size * 0.035))))
+    out = Image.alpha_composite(out, bloom)
 
-    # crisp bright ring for a defined halo edge
-    ring = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    ImageDraw.Draw(ring).rounded_rectangle(
-        box, radius=rad, outline=(210, 240, 255, 255), width=max(1, int(size * 0.02)))
-    out = Image.alpha_composite(out, ring)
+    # crisp neon line following the button outline
+    line = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    ImageDraw.Draw(line).rounded_rectangle(
+        box, radius=rad, outline=(205, 240, 255, 255), width=max(2, int(size * 0.018)))
+    out = Image.alpha_composite(out, line)
     return out.convert("RGB")
 
 
