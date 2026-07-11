@@ -250,6 +250,7 @@ class MainWindow(QMainWindow):
             btn = KeyButton(idx)
             btn.selected.connect(self._on_key_selected)
             btn.actionDropped.connect(self._on_action_dropped)
+            btn.keyMoved.connect(self._on_key_moved)
             self.grid.addWidget(btn, r, c)
             self.buttons[idx] = btn
         self._refresh_all_previews()
@@ -374,6 +375,27 @@ class MainWindow(QMainWindow):
             b.setChecked(i == index)
         kc = self._page().key(index)
         self.editor.set_key(kc, index)
+
+    def _on_key_moved(self, src: int, dst: int):
+        """Swap two keys' configs (drag one key onto another to rearrange)."""
+        if src == dst:
+            return
+        page = self._page()
+        a = page.keys.get(src, KeyConfig())
+        b = page.keys.get(dst, KeyConfig())
+        page.keys[src] = b
+        page.keys[dst] = a
+        for i in (src, dst):
+            self.buttons[i].update_preview(page.keys.get(i, KeyConfig()))
+            if self.controller.connected:
+                self.controller.render_key(i)
+        if self.controller.connected:
+            try:
+                self.controller.device.refresh()
+            except Exception:
+                pass
+        self._on_key_selected(dst)   # follow the key to its new slot
+        self._queue_save()
 
     def _on_action_dropped(self, index: int, atype: str):
         kc = self._page().key(index)

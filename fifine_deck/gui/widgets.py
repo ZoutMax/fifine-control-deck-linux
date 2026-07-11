@@ -1,13 +1,13 @@
 """Reusable widgets: key button, action editor, action catalog, knob editor."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QMimeData
+from PyQt6.QtCore import Qt, pyqtSignal, QSize, QMimeData, QPoint
 from PyQt6.QtGui import QPixmap, QColor, QIcon, QDrag
 from PyQt6.QtWidgets import (
     QToolButton, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
     QLineEdit, QPlainTextEdit, QComboBox, QPushButton, QColorDialog, QFileDialog,
     QSpinBox, QDialog, QScrollArea, QGridLayout, QListWidget, QListWidgetItem,
-    QAbstractItemView, QFrame,
+    QAbstractItemView, QFrame, QApplication,
 )
 
 from .. import rendering, assets
@@ -15,6 +15,7 @@ from ..actions import ACTION_TYPES, ACTION_CATALOG
 from ..model import KeyConfig, KnobConfig, Action
 
 MIME_ACTION = "application/x-fifine-action"
+MIME_KEY = "application/x-fifine-key"    # dragging a key to rearrange it
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +72,7 @@ class IconLibraryDialog(QDialog):
 class KeyButton(QToolButton):
     selected = pyqtSignal(int)
     actionDropped = pyqtSignal(int, str)   # (index, action_type)
+    keyMoved = pyqtSignal(int, int)        # (source_index, target_index) swap
 
     def __init__(self, index: int, size: int = 96):
         super().__init__()
@@ -87,6 +89,7 @@ class KeyButton(QToolButton):
             "QToolButton:hover{border-color:#409eff;}")
         self.setStyleSheet(self._base_qss)
         self.clicked.connect(lambda: self.selected.emit(self.index))
+        self._press_pos: QPoint | None = None
 
     def update_preview(self, kc: KeyConfig):
         icon = kc.icon
@@ -107,9 +110,33 @@ class KeyButton(QToolButton):
             "QToolButton{border:2px solid #00ff88;border-radius:10px;background:#0b0b12;}"
             if on else self._base_qss)
 
-    # drag & drop of catalog actions -------------------------------------
+    # -- start a drag to rearrange this key -------------------------------
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = e.position().toPoint()
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if not (e.buttons() & Qt.MouseButton.LeftButton) or self._press_pos is None:
+            return super().mouseMoveEvent(e)
+        if (e.position().toPoint() - self._press_pos).manhattanLength() \
+                < QApplication.startDragDistance():
+            return super().mouseMoveEvent(e)
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(MIME_KEY, str(self.index).encode())
+        drag.setMimeData(mime)
+        pm = self.icon().pixmap(QSize(self._size, self._size))
+        if not pm.isNull():
+            drag.setPixmap(pm)
+            drag.setHotSpot(QPoint(pm.width() // 2, pm.height() // 2))
+        drag.exec(Qt.DropAction.MoveAction)
+        self.setDown(False)
+
+    # -- drop targets: a catalog action, or another key being rearranged --
     def dragEnterEvent(self, e):
-        if e.mimeData().hasFormat(MIME_ACTION):
+        md = e.mimeData()
+        if md.hasFormat(MIME_ACTION) or md.hasFormat(MIME_KEY):
             e.acceptProposedAction()
             self.setStyleSheet(
                 "QToolButton{border:2px dashed #409eff;border-radius:10px;background:#12203a;}")
@@ -119,8 +146,14 @@ class KeyButton(QToolButton):
 
     def dropEvent(self, e):
         self.setStyleSheet(self._base_qss)
-        if e.mimeData().hasFormat(MIME_ACTION):
-            atype = bytes(e.mimeData().data(MIME_ACTION)).decode()
+        md = e.mimeData()
+        if md.hasFormat(MIME_KEY):
+            src = int(bytes(md.data(MIME_KEY)).decode())
+            if src != self.index:
+                self.keyMoved.emit(src, self.index)
+            e.acceptProposedAction()
+        elif md.hasFormat(MIME_ACTION):
+            atype = bytes(md.data(MIME_ACTION)).decode()
             self.actionDropped.emit(self.index, atype)
             e.acceptProposedAction()
 
