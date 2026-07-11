@@ -116,14 +116,34 @@ class MainWindow(QMainWindow):
         self._save_timer.setInterval(600)
         self._save_timer.timeout.connect(lambda: self.config.save())
 
+    def _tray_host_present(self) -> bool:
+        """Reliable tray check: is a StatusNotifier host actually on the bus?
+        Qt's isSystemTrayAvailable() gives false positives on some Wayland
+        compositors, which would trap the window on close-to-tray."""
+        try:
+            from PyQt6.QtDBus import QDBusConnection
+            bus = QDBusConnection.sessionBus()
+            iface = bus.interface()
+            for name in ("org.kde.StatusNotifierWatcher",
+                         "org.freedesktop.StatusNotifierWatcher"):
+                reply = iface.isServiceRegistered(name)
+                if reply.value():
+                    return True
+        except Exception:
+            pass
+        return False
+
     def _build_tray(self):
         icon = self._app_icon()
         self.setWindowIcon(icon)
-        # Some Wayland compositors have no StatusNotifier host; don't create a
-        # tray icon there (closing would otherwise hide the window with no way
-        # to restore it).
+        # Only create a tray icon when a real host exists; otherwise closing
+        # would hide the window with no way to restore it.
         self.tray = None
-        if not QSystemTrayIcon.isSystemTrayAvailable():
+        # Opt-in: only build a tray when explicitly requested AND a real
+        # StatusNotifier host is on the bus (avoids the close-to-tray trap and
+        # D-Bus warnings on compositors without a tray host).
+        import os as _os
+        if _os.environ.get("FIFINE_TRAY") != "1" or not self._tray_host_present():
             return
         self.tray = QSystemTrayIcon(icon, self)
         menu = QMenu()
