@@ -81,6 +81,7 @@ ACTION_TYPES: dict[str, dict] = {
     "sleep_screen":  {"label": "Sleep screen", "params": []},
     "open_folder":   {"label": "Open folder", "params": []},
     "folder_back":   {"label": "Back (exit folder)", "params": []},
+    "multi":         {"label": "Multi-action (steps)", "params": []},  # edited specially
 }
 
 
@@ -92,6 +93,7 @@ ACTION_CATALOG = [
     ("Deck",        ["next_page", "prev_page", "goto_page", "switch_profile",
                      "next_profile", "prev_profile", "brightness", "sleep_screen"]),
     ("Folders",     ["open_folder", "folder_back"]),
+    ("Advanced",    ["multi"]),
 ]
 
 # A default library-icon name + label to auto-assign when an action is dropped.
@@ -115,6 +117,7 @@ ACTION_DEFAULT_ICON = {
     "sleep_screen": ("dot", "Sleep"),
     "open_folder": ("folder", "Folder"),
     "folder_back": ("prev_page", "Back"),
+    "multi": ("star", "Multi"),
 }
 
 

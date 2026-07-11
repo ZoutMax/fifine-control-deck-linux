@@ -6,8 +6,8 @@ from PyQt6.QtGui import QPixmap, QColor, QIcon, QDrag
 from PyQt6.QtWidgets import (
     QToolButton, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
     QLineEdit, QPlainTextEdit, QComboBox, QPushButton, QColorDialog, QFileDialog,
-    QSpinBox, QDialog, QScrollArea, QGridLayout, QListWidget, QListWidgetItem,
-    QAbstractItemView, QFrame, QApplication,
+    QSpinBox, QDoubleSpinBox, QDialog, QScrollArea, QGridLayout, QListWidget,
+    QListWidgetItem, QAbstractItemView, QFrame, QApplication,
 )
 
 from .. import rendering, assets
@@ -233,14 +233,18 @@ class ColorButton(QPushButton):
 class ActionParamsWidget(QWidget):
     changed = pyqtSignal()
 
-    def __init__(self):
+    def __init__(self, exclude=None):
         super().__init__()
         self._building = False
+        self._exclude = set(exclude or [])
         self._params: dict[str, QWidget] = {}
+        self._multi_editor = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self.type_combo = QComboBox()
         for key, meta in ACTION_TYPES.items():
+            if key in self._exclude:
+                continue
             self.type_combo.addItem(meta["label"], key)
         self.type_combo.currentIndexChanged.connect(self._on_type)
         form = QFormLayout()
@@ -271,6 +275,13 @@ class ActionParamsWidget(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         self._params = {}
+        self._multi_editor = None
+        if atype == "multi":
+            self._multi_editor = MultiStepsEditor()
+            self._multi_editor.set_steps(values.get("steps", []))
+            self._multi_editor.changed.connect(self._emit)
+            self._params_box.addWidget(self._multi_editor)
+            return
         spec = ACTION_TYPES.get(atype, {}).get("params", [])
         if not spec:
             return
@@ -311,6 +322,8 @@ class ActionParamsWidget(QWidget):
         self._params_box.addWidget(holder)
 
     def _collect(self):
+        if self._multi_editor is not None:
+            return {"steps": self._multi_editor.get_steps()}
         out = {}
         for k, w in self._params.items():
             if isinstance(w, QPlainTextEdit):
@@ -328,6 +341,109 @@ class ActionParamsWidget(QWidget):
     def _emit(self, *_):
         if not self._building:
             self.changed.emit()
+
+
+# ---------------------------------------------------------------------------
+# Multi-action editor: an ordered list of sub-action steps with per-step delay
+# ---------------------------------------------------------------------------
+_STEP_EXCLUDE = {"multi", "open_folder", "folder_back"}   # not valid as a step
+
+
+class _StepRow(QFrame):
+    changed = pyqtSignal()
+    removed = pyqtSignal()
+
+    def __init__(self, step: dict | None = None):
+        super().__init__()
+        self.setStyleSheet("QFrame{background:#1f1f1f;border:1px solid #333;border-radius:6px;}")
+        v = QVBoxLayout(self)
+        top = QHBoxLayout()
+        top.addWidget(QLabel("Do:"))
+        top.addStretch()
+        rm = QPushButton("✕")
+        rm.setFixedWidth(26)
+        rm.setToolTip("Remove step")
+        rm.clicked.connect(self.removed.emit)
+        top.addWidget(rm)
+        v.addLayout(top)
+        self.apw = ActionParamsWidget(exclude=_STEP_EXCLUDE)
+        self.apw.changed.connect(self.changed.emit)
+        v.addWidget(self.apw)
+        drow = QHBoxLayout()
+        drow.addWidget(QLabel("then wait (s):"))
+        self.delay = QDoubleSpinBox()
+        self.delay.setRange(0.0, 30.0)
+        self.delay.setSingleStep(0.1)
+        self.delay.setDecimals(1)
+        self.delay.valueChanged.connect(self.changed.emit)
+        drow.addWidget(self.delay)
+        drow.addStretch()
+        v.addLayout(drow)
+        if step:
+            self.apw.set_action(Action.from_dict(step.get("action", {})))
+            try:
+                self.delay.setValue(float(step.get("delay", 0) or 0))
+            except (TypeError, ValueError):
+                pass
+        else:
+            self.apw.set_action(Action("launch_app", {}))
+
+    def value(self) -> dict:
+        return {"action": self.apw.get_action().to_dict(), "delay": self.delay.value()}
+
+
+class MultiStepsEditor(QWidget):
+    """Edits an ordered list of steps for a Multi-action."""
+    changed = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self._rows: list[_StepRow] = []
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+        lbl = QLabel("Steps (run top to bottom on press):")
+        lbl.setStyleSheet("color:#9a9a9a;")
+        v.addWidget(lbl)
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFixedHeight(300)
+        host = QWidget()
+        self._vbox = QVBoxLayout(host)
+        self._vbox.addStretch()
+        self._scroll.setWidget(host)
+        v.addWidget(self._scroll)
+        add = QPushButton("＋ Add step")
+        add.clicked.connect(self._on_add)
+        v.addWidget(add)
+
+    def _on_add(self):
+        self._add_row()
+        self.changed.emit()
+
+    def _add_row(self, step: dict | None = None):
+        row = _StepRow(step)
+        row.changed.connect(self.changed.emit)
+        row.removed.connect(lambda r=row: self._remove(r))
+        self._rows.append(row)
+        self._vbox.insertWidget(self._vbox.count() - 1, row)  # keep trailing stretch
+
+    def _remove(self, row: _StepRow):
+        if row in self._rows:
+            self._rows.remove(row)
+            row.setParent(None)
+            row.deleteLater()
+            self.changed.emit()
+
+    def set_steps(self, steps):
+        for r in self._rows:
+            r.setParent(None)
+            r.deleteLater()
+        self._rows = []
+        for st in (steps or []):
+            self._add_row(st)
+
+    def get_steps(self) -> list:
+        return [r.value() for r in self._rows]
 
 
 class ActionEditor(QWidget):
