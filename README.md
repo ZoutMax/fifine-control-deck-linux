@@ -11,6 +11,18 @@ with profiles, multiple pages, a configuration GUI, and a system tray.
 > reuses only the vendor's **MIT-licensed** `StreamDock` device backend (the
 > `libtransport.so` USB layer) and builds an original Python/PyQt6 app on top.
 
+## Status: Alpha
+
+The core is feature-complete and hardened, but it's early. Realistic expectations:
+
+- ✅ **Verified on hardware:** Stream Dock **293V3 family** (`3142:0060`, 15 keys) —
+  images, key input, brightness, folders, multi-actions, hotplug.
+- ⚠️ **Other Stream Dock models** are in the device table but **untested** here —
+  key count / image size / mapping may need tuning in `DEVICE_PROFILE`.
+- ⚠️ **Knob/dial** support is implemented but **unverified** (no knob hardware).
+- ⚠️ Limited field testing across distros/desktops. Feedback and device reports
+  (via GitHub issues) are very welcome.
+
 ## Features
 
 - Live per-key icons + text labels, colour backgrounds, custom images, and
