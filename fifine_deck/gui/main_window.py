@@ -65,6 +65,14 @@ class MainWindow(QMainWindow):
         m.addAction(hide_act)
         m.addAction(show_min)
         m.addSeparator()
+        # Start on login (hidden) toggle
+        import os as _os
+        from ..app import AUTOSTART_FILE, set_autostart
+        self.autostart_act = QAction("Start on login (hidden)", self, checkable=True)
+        self.autostart_act.setChecked(_os.path.exists(AUTOSTART_FILE))
+        self.autostart_act.toggled.connect(lambda on: set_autostart(on))
+        m.addAction(self.autostart_act)
+        m.addSeparator()
         m.addAction(quit_act)
 
     def show_and_raise(self):

@@ -109,6 +109,43 @@ def _popen_detached(args, shell=False):
     )
 
 
+# Linux input-event key codes for translating hotkey names -> ydotool keycodes.
+_KEYCODES = {
+    "ctrl": 29, "control": 29, "ctrl_r": 97, "shift": 42, "shift_r": 54,
+    "alt": 56, "alt_r": 100, "altgr": 100, "super": 125, "meta": 125,
+    "win": 125, "logo": 125,
+    "esc": 1, "escape": 1, "tab": 15, "enter": 28, "return": 28, "space": 57,
+    "backspace": 14, "delete": 111, "del": 111, "insert": 110, "ins": 110,
+    "home": 102, "end": 107, "pageup": 104, "pgup": 104, "pagedown": 109,
+    "pgdn": 109, "up": 103, "down": 108, "left": 105, "right": 106,
+    "minus": 12, "-": 12, "equal": 13, "=": 13, "comma": 51, ",": 51,
+    "dot": 52, "period": 52, ".": 52, "slash": 53, "/": 53,
+    "semicolon": 39, ";": 39, "capslock": 58, "printscreen": 99, "print": 99,
+}
+for _i, _c in enumerate("1234567890"):
+    _KEYCODES[_c] = 2 + _i
+for _c, _v in {"a": 30, "b": 48, "c": 46, "d": 32, "e": 18, "f": 33, "g": 34,
+               "h": 35, "i": 23, "j": 36, "k": 37, "l": 38, "m": 50, "n": 49,
+               "o": 24, "p": 25, "q": 16, "r": 19, "s": 31, "t": 20, "u": 22,
+               "v": 47, "w": 17, "x": 45, "y": 21, "z": 44}.items():
+    _KEYCODES[_c] = _v
+for _n in range(1, 11):
+    _KEYCODES[f"f{_n}"] = 58 + _n            # F1=59 .. F10=68
+_KEYCODES["f11"] = 87
+_KEYCODES["f12"] = 88
+
+
+def _ydotool_keycodes(combo: str):
+    """Translate 'ctrl+shift+m' -> [(29),(42),(50)] input keycodes, or None."""
+    codes = []
+    for part in combo.split("+"):
+        code = _KEYCODES.get(part.strip().lower())
+        if code is None:
+            return None
+        codes.append(code)
+    return codes
+
+
 def _send_hotkey(combo: str) -> None:
     """Send a key combination like 'ctrl+shift+m'. Best-effort across tools."""
     combo = combo.strip()
@@ -132,8 +169,13 @@ def _send_hotkey(combo: str) -> None:
                             "shift": "shift", "super": "logo", "meta": "logo"}.get(m, m)]
         subprocess.run(args, stderr=subprocess.DEVNULL)
     elif KEY_TOOL == "ydotool":
-        # ydotool key uses keycodes; fall back to `ydotool key` with names via 'key'
-        subprocess.run(["ydotool", "key", combo], stderr=subprocess.DEVNULL)
+        # ydotool needs numeric keycodes: press all down (in order), release up.
+        codes = _ydotool_keycodes(combo)
+        if not codes:
+            print(f"[action] hotkey '{combo}': unknown key name for ydotool", flush=True)
+            return
+        seq = [f"{c}:1" for c in codes] + [f"{c}:0" for c in reversed(codes)]
+        subprocess.run(["ydotool", "key", *seq], stderr=subprocess.DEVNULL)
 
 
 def _type_text(text: str) -> None:

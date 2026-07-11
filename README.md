@@ -47,12 +47,13 @@ Optional, for specific actions (install what you use):
 
 The status bar shows what was detected on your session.
 
-> **ydotool note (Wayland):** hotkey/type actions use `ydotool`, which needs
-> its daemon running with access to `/dev/uinput`:
+> **ydotool note (Wayland):** hotkey / type-text actions use `ydotool`, which
+> needs its background daemon. The `ydotool` package ships a user service —
+> enable it once:
 > ```bash
-> sudo modprobe uinput
-> sudo ydotoold           # or run as a service; creates /tmp/.ydotool_socket
+> systemctl --user enable --now ydotool
 > ```
+> (It talks to `/dev/uinput`, which the desktop session grants via an ACL.)
 > On X11, `xdotool` works with no daemon. `playerctl` (media) and `wpctl`
 > (volume) need no daemon.
 
@@ -101,15 +102,19 @@ The app ships a built-in icon library (`assets/icons/library/`) — pick icons i
 the key editor via **Library…**, or load your own image with **File…**. Icons
 are regenerated with `python3 tools/make_icons.py`.
 
-## Autostart (optional)
+## Autostart on login
+
+Run the deck automatically on login — the window starts hidden, and your keys
+are active immediately. Open the window any time by launching the app again
+(it re-uses the running instance); close it to hide back to the background.
 
 ```bash
-mkdir -p ~/.config/systemd/user
-cp packaging/fifine-deck.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now fifine-deck.service
-journalctl --user -u fifine-deck.service -f   # logs
+fifine-control-deck --enable-autostart      # or App -> "Start on login (hidden)"
+fifine-control-deck --disable-autostart     # turn it off
 ```
+
+Advanced: a headless (no-GUI) systemd **user** service is also provided in
+`packaging/fifine-deck.service` if you prefer running without any window.
 
 ## Configuration
 

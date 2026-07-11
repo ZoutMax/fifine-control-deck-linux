@@ -28,7 +28,36 @@ def _signal_existing(command: str) -> bool:
     return True
 
 
-def run_gui(quit_flag: bool = False) -> int:
+AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/fifine-control-deck.desktop")
+
+_AUTOSTART_ENTRY = """[Desktop Entry]
+Type=Application
+Name=fifine Control Deck
+Comment=Keep the deck active on login (window hidden)
+Exec=fifine-control-deck --hidden
+Icon=fifine-control-deck
+Terminal=false
+X-GNOME-Autostart-enabled=true
+"""
+
+
+def set_autostart(enable: bool) -> int:
+    if enable:
+        os.makedirs(os.path.dirname(AUTOSTART_FILE), exist_ok=True)
+        with open(AUTOSTART_FILE, "w") as f:
+            f.write(_AUTOSTART_ENTRY)
+        print(f"Autostart enabled: {AUTOSTART_FILE}")
+        print("The deck will run (hidden) on login; open the window by launching the app.")
+    else:
+        try:
+            os.remove(AUTOSTART_FILE)
+            print("Autostart disabled.")
+        except FileNotFoundError:
+            print("Autostart was not enabled.")
+    return 0
+
+
+def run_gui(quit_flag: bool = False, hidden: bool = False) -> int:
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtGui import QIcon
     from PyQt6.QtNetwork import QLocalServer
@@ -79,7 +108,8 @@ def run_gui(quit_flag: bool = False) -> int:
 
     server.newConnection.connect(_on_conn)
 
-    win.show()
+    if not hidden:
+        win.show()
 
     # start the device in the background (non-fatal if absent)
     controller.start()
@@ -114,12 +144,22 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="fifine Control Deck for Linux")
     ap.add_argument("--headless", action="store_true",
                     help="run the key daemon without the GUI")
+    ap.add_argument("--hidden", action="store_true",
+                    help="start with the window hidden (deck active in background)")
     ap.add_argument("--quit", action="store_true",
                     help="tell a running GUI instance to quit")
+    ap.add_argument("--enable-autostart", action="store_true",
+                    help="run (hidden) automatically on login")
+    ap.add_argument("--disable-autostart", action="store_true",
+                    help="stop running automatically on login")
     args = ap.parse_args()
+    if args.enable_autostart:
+        return set_autostart(True)
+    if args.disable_autostart:
+        return set_autostart(False)
     if args.headless:
         return run_headless()
-    return run_gui(quit_flag=args.quit)
+    return run_gui(quit_flag=args.quit, hidden=args.hidden)
 
 
 if __name__ == "__main__":
