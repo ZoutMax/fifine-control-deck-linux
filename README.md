@@ -112,6 +112,10 @@ sudo usermod -aG plugdev "$USER"   # then log out/in if it was just added
 
 To build the `.deb` yourself: `./packaging/build-deb.sh` → `dist/`.
 
+**Snap / Ubuntu App Center:** snap packaging lives in `snap/` — see
+[`docs/SNAP.md`](docs/SNAP.md) for building and publishing (and the device-access
+caveat under snap confinement).
+
 ## Run from source (development)
 
 1. **Install the udev rule** (one time, needs root) so the device is usable

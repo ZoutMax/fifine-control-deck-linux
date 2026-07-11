@@ -1,0 +1,60 @@
+name: fifine-control-deck
+base: core24
+version: '0.5.2'
+summary: Control app for fifine / Stream Dock macro keypads
+description: |
+  A native Linux control application for the fifine Control Deck (a
+  Mirabox / Hotspot "Stream Dock" style macro keypad with per-key LCDs).
+  Draw icons and labels on the keys and bind them to actions: launch apps,
+  hotkeys, media and volume control, scripts, brightness, page/profile
+  switching, folders and multi-step macros — with a PyQt6 configuration GUI.
+
+  NOTE: the deck is accessed over USB (/dev/hidraw). Under strict confinement
+  the app needs the raw-usb / hardware-observe interfaces connected; on a
+  classic desktop the reliable path for full device access is the classic
+  build (see docs/SNAP.md).
+
+grade: stable
+confinement: strict
+
+platforms:
+  amd64:
+  arm64:
+
+apps:
+  fifine-control-deck:
+    command: bin/fifine-control-deck-launch
+    extensions: [gnome]
+    plugs:
+      - home
+      - network
+      - raw-usb            # USB device access (usbfs)
+      - hardware-observe   # enumerate/inspect the device
+      - audio-playback     # volume/media actions
+      - removable-media
+
+parts:
+  # Application code + assets + the vendored MIT device backend (libtransport.so)
+  fifine-deck:
+    plugin: python
+    source: .
+    python-packages:
+      - PyQt6
+      - Pillow
+      - pyudev
+    stage-packages:
+      - libudev1
+      - libxcb-cursor0     # required by Qt6's xcb platform plugin
+    override-build: |
+      craftctl default
+      dest="$CRAFT_PART_INSTALL/lib/fifine-control-deck"
+      mkdir -p "$dest"
+      cp -r "$CRAFT_PART_SRC/fifine_deck" "$dest/"
+      cp -r "$CRAFT_PART_SRC/assets" "$dest/"
+      # drop non-Linux / other-arch transport binaries to slim the snap
+      find "$dest" -type f \( -name '*.dll' -o -name '*.dylib' \) -delete || true
+
+  # Launch wrapper (sets PYTHONPATH to the bundled app package)
+  launcher:
+    plugin: dump
+    source: snap/local

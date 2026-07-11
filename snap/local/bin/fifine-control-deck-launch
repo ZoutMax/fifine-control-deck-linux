@@ -1,0 +1,6 @@
+#!/bin/bash
+# Snap launch wrapper: make the bundled app package importable and run it.
+export PYTHONPATH="$SNAP/lib/fifine-control-deck${PYTHONPATH:+:$PYTHONPATH}"
+# No system-tray host assumption inside the snap sandbox.
+export FIFINE_TRAY="${FIFINE_TRAY:-0}"
+exec python3 -m fifine_deck "$@"
