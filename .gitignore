@@ -19,10 +19,8 @@ debian/*.debhelper.log
 *.buildinfo
 *.changes
 *.ddeb
-# Ignore built packages except the stable-named "latest" ones we ship in-repo.
-dist/*
-!dist/fifine-control-deck_latest_amd64.deb
-!dist/fifine-control-deck_latest_arm64.deb
+# Built packages are published to GitHub Releases, not committed.
+dist/
 *.egg-info/
 # local runtime artifacts
 /tmp/

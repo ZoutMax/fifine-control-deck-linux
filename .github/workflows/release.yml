@@ -30,6 +30,10 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           ./packaging/build-deb.sh "$VERSION" amd64
           ./packaging/build-deb.sh "$VERSION" arm64
+          # stable, version-agnostic names so the README's
+          # releases/latest/download/... link always resolves to the newest.
+          cp "dist/fifine-control-deck_${VERSION}_amd64.deb" dist/fifine-control-deck_amd64.deb
+          cp "dist/fifine-control-deck_${VERSION}_arm64.deb" dist/fifine-control-deck_arm64.deb
           ls -la dist/*.deb
 
       - name: Publish GitHub Release
@@ -39,5 +43,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "dist/fifine-control-deck_${VERSION}_amd64.deb" \
             "dist/fifine-control-deck_${VERSION}_arm64.deb" \
+            "dist/fifine-control-deck_amd64.deb" \
+            "dist/fifine-control-deck_arm64.deb" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes

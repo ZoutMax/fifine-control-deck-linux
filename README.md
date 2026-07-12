@@ -102,8 +102,8 @@ package for your CPU and install it — this one-liner auto-detects the arch:
 
 ```bash
 ARCH=$(dpkg --print-architecture)   # amd64 or arm64
-wget https://github.com/ZoutMax/fifine-control-deck-linux/raw/main/dist/fifine-control-deck_latest_${ARCH}.deb
-sudo apt install ./fifine-control-deck_latest_${ARCH}.deb
+wget https://github.com/ZoutMax/fifine-control-deck-linux/releases/latest/download/fifine-control-deck_${ARCH}.deb
+sudo apt install ./fifine-control-deck_${ARCH}.deb
 ```
 
 `apt install ./…deb` **installs all dependencies automatically** — PyQt6 and
