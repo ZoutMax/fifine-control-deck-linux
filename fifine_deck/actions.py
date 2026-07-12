@@ -8,12 +8,15 @@ controller, because they need device + config state.
 """
 from __future__ import annotations
 
+import logging
 import os
 import shlex
 import shutil
 import subprocess
 import time
 from typing import Protocol
+
+log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Environment detection (done once).
@@ -182,7 +185,7 @@ def _run(args, **kw):
     try:
         subprocess.run(_host(args), **kw)
     except Exception as e:
-        print(f"[action] command failed: {e}", flush=True)
+        log.warning("command failed: %s", e)
 
 
 # Linux input-event key codes for translating hotkey names -> ydotool keycodes.
@@ -227,7 +230,7 @@ def _send_hotkey(combo: str) -> None:
     combo = combo.strip()
     if not combo or not KEY_TOOL:
         if not KEY_TOOL:
-            print("[action] no keystroke tool (install xdotool / ydotool / wtype)", flush=True)
+            log.warning("no keystroke tool (install xdotool / ydotool / wtype)")
         return
     if KEY_TOOL == "xdotool":
         _run(["xdotool", "key", "--clearmodifiers", combo],
@@ -248,7 +251,7 @@ def _send_hotkey(combo: str) -> None:
         # ydotool needs numeric keycodes: press all down (in order), release up.
         codes = _ydotool_keycodes(combo)
         if not codes:
-            print(f"[action] hotkey '{combo}': unknown key name for ydotool", flush=True)
+            log.warning("hotkey '%s': unknown key name for ydotool", combo)
             return
         seq = [f"{c}:1" for c in codes] + [f"{c}:0" for c in reversed(codes)]
         _run(["ydotool", "key", *seq], stderr=subprocess.DEVNULL)
@@ -276,14 +279,14 @@ def _close_app(target: str) -> None:
     elif _has("pkill"):
         _run(["pkill", "-f", target], stderr=subprocess.DEVNULL)
     else:
-        print("[action] close needs 'wmctrl' or 'pkill'", flush=True)
+        log.warning("close needs 'wmctrl' or 'pkill'")
 
 
 def _media(cmd: str) -> None:
     if HAS_PLAYERCTL:
         _run(["playerctl", cmd], stderr=subprocess.DEVNULL)
     else:
-        print("[action] media control needs 'playerctl'", flush=True)
+        log.warning("media control needs 'playerctl'")
 
 
 SINK = "@DEFAULT_AUDIO_SINK@"
@@ -310,7 +313,7 @@ def _volume(cmd: str, step: str) -> None:
         elif cmd == "mute":
             _run(["pactl", "set-sink-mute", s, "toggle"])
     else:
-        print("[action] volume control needs pipewire (wpctl) or pulseaudio (pactl)", flush=True)
+        log.warning("volume control needs pipewire (wpctl) or pulseaudio (pactl)")
 
 
 def execute(action, context: ActionContext | None = None) -> None:
@@ -376,9 +379,9 @@ def execute(action, context: ActionContext | None = None) -> None:
                 if delay:
                     time.sleep(delay)
         else:
-            print(f"[action] unhandled or context-less action: {t}", flush=True)
+            log.warning("unhandled or context-less action: %s", t)
     except Exception as e:  # actions must never crash the reader thread
-        print(f"[action] '{t}' failed: {e}", flush=True)
+        log.error("'%s' failed: %s", t, e)
 
 
 def environment_summary() -> str:

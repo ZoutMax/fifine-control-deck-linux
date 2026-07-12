@@ -11,6 +11,7 @@ on_page_changed) let a GUI observe state without this module importing Qt.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from typing import Callable, Optional
@@ -24,6 +25,8 @@ from .model import DeckConfig, Profile, Page, KeyConfig
 
 from StreamDock.DeviceManager import DeviceManager
 from StreamDock.InputTypes import EventType
+
+log = logging.getLogger(__name__)
 
 
 class DeckController:
@@ -78,7 +81,7 @@ class DeckController:
                 auto_open=False,
             )
         except Exception as e:
-            print(f"[controller] hotplug listener stopped: {e}", flush=True)
+            log.error("hotplug listener stopped: %s", e)
 
     def _on_added(self, dev):
         if self._running and isinstance(dev, FifineDeck) and self.device is None:
@@ -94,8 +97,7 @@ class DeckController:
     def _setup_device(self, dev: FifineDeck) -> bool:
         try:
             if not dev.open():
-                print("[controller] open() failed (permissions? udev rule installed?)",
-                      flush=True)
+                log.warning("open() failed (permissions? udev rule installed?)")
                 return False
             dev.init()
             with self._lock:
@@ -106,11 +108,10 @@ class DeckController:
             self.render_page()
             if self.on_connect:
                 self.on_connect(dev)
-            print(f"[controller] connected: fw={dev.firmware_version!r} "
-                  f"keys={dev.KEY_COUNT}", flush=True)
+            log.info("connected: fw=%r keys=%s", dev.firmware_version, dev.KEY_COUNT)
             return True
         except Exception as e:
-            print(f"[controller] device setup failed: {e}", flush=True)
+            log.error("device setup failed: %s", e)
             return False
 
     def stop(self):
@@ -202,7 +203,7 @@ class DeckController:
                     dev.set_key_image_pil(index, img)
                 self._sync_gif_loop()
             except Exception as e:
-                print(f"[controller] render key {index} failed: {e}", flush=True)
+                log.error("render key %s failed: %s", index, e)
 
     def _sync_gif_loop(self) -> None:
         dev = self.device
@@ -214,7 +215,7 @@ class DeckController:
             else:
                 dev.stop_gif_loop()
         except Exception as e:
-            print(f"[controller] gif loop sync failed: {e}", flush=True)
+            log.error("gif loop sync failed: %s", e)
 
     def render_page(self) -> None:
         with self._lock:
@@ -233,7 +234,7 @@ class DeckController:
                 try:
                     dev.refresh()
                 except Exception as e:
-                    print(f"[controller] refresh failed: {e}", flush=True)
+                    log.error("refresh failed: %s", e)
         # Fire even with no device so the GUI resyncs (e.g. editing folders offline).
         if self.on_page_changed:
             self.on_page_changed()
@@ -261,7 +262,7 @@ class DeckController:
             try:
                 task()
             except Exception as e:   # never let the worker die
-                print(f"[controller] action worker error: {e}", flush=True)
+                log.error("action worker error: %s", e)
 
     def flash_key(self, index: int, pressed: bool) -> None:
         """Flash a key (brightened) on the device while pressed; restore it on
@@ -280,7 +281,7 @@ class DeckController:
                 dev.set_key_image_pil(index, img)
                 dev.refresh()
             except Exception as e:
-                print(f"[controller] flash key {index} failed: {e}", flush=True)
+                log.error("flash key %s failed: %s", index, e)
 
     def _key_callback(self, device, event):
         if event.event_type == EventType.BUTTON:
@@ -348,7 +349,7 @@ class DeckController:
                 try:
                     self.device.transport.sleep()
                 except Exception as e:
-                    print(f"[controller] sleep failed: {e}", flush=True)
+                    log.error("sleep failed: %s", e)
 
     def goto_page(self, index: int) -> None:
         self.page_index = index
@@ -371,7 +372,7 @@ class DeckController:
                 try:
                     self.device.refresh()
                 except Exception as e:
-                    print(f"[controller] refresh failed: {e}", flush=True)
+                    log.error("refresh failed: %s", e)
 
     def apply_brightness(self) -> None:
         with self._lock:
@@ -379,7 +380,7 @@ class DeckController:
                 try:
                     self.device.set_brightness(self.config.brightness)
                 except Exception as e:
-                    print(f"[controller] brightness failed: {e}", flush=True)
+                    log.error("brightness failed: %s", e)
 
     def set_brightness(self, percent: int) -> None:
         self.config.brightness = max(0, min(100, int(percent)))

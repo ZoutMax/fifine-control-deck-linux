@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import signal
 import sys
 
@@ -12,6 +13,15 @@ from .controller import DeckController
 import os
 
 _IPC_NAME = f"fifine-control-deck-{os.getuid()}"
+
+log = logging.getLogger(__name__)
+
+
+def _configure_logging() -> None:
+    """Configure root logging; level from $FIFINE_LOG (default INFO)."""
+    level = os.environ.get("FIFINE_LOG", "INFO").upper()
+    logging.basicConfig(level=getattr(logging, level, logging.INFO),
+                        format="%(levelname)s %(name)s: %(message)s")
 
 
 def _signal_existing(command: str) -> bool:
@@ -132,7 +142,7 @@ def run_headless() -> int:
     config = DeckConfig.load()
     controller = DeckController(config)
     ok = controller.start()
-    print(f"[headless] started; device connected = {ok}. Ctrl+C to quit.", flush=True)
+    log.info("headless started; device connected=%s. Ctrl+C to quit.", ok)
     try:
         while True:
             time.sleep(0.5)
@@ -144,6 +154,7 @@ def run_headless() -> int:
 
 
 def main() -> int:
+    _configure_logging()
     ap = argparse.ArgumentParser(description="fifine Control Deck for Linux")
     ap.add_argument("--headless", action="store_true",
                     help="run the key daemon without the GUI")
