@@ -59,8 +59,6 @@
            font-variant-numeric:tabular-nums; text-decoration:none}
   .version:hover{color:var(--text); border-color:var(--purple); text-decoration:none}
 
-  .dlcount{margin-left:8px; opacity:.8; font-weight:500}
-
   @media (max-width:640px){ .cmds{grid-template-columns:1fr} .features ul{grid-template-columns:1fr} }
 </style>
 </head>
@@ -75,7 +73,7 @@
       <div class="cta">
         <a class="btn snap" href="https://snapcraft.io/fifine-control-deck">Install from Snap Store</a>
         <a class="btn ppa" href="https://launchpad.net/~zoutmax/+archive/ubuntu/fifine">Add the PPA (apt)</a>
-        <a class="btn deb" href="https://github.com/ZoutMax/fifine-control-deck-linux/releases/latest">Download .deb<span class="dlcount" id="deb-count"></span></a>
+        <a class="btn deb" href="https://github.com/ZoutMax/fifine-control-deck-linux/releases/latest">Download .deb</a>
       </div>
     </div>
   </header>
@@ -134,30 +132,21 @@ sudo apt install fifine-control-deck</pre>
   </footer>
 
   <script>
-    // One GitHub API call fills the version pill (latest release) AND the live
-    // .deb download count (sum of all release assets). GitHub allows CORS;
-    // the Snap Store and Launchpad expose no browser-fetchable counts, so only
-    // the .deb button carries a number.
+    // Show the latest GitHub release tag below the title, fetched at load so it
+    // always reflects the newest release (no rebuild needed).
     (function () {
-      var ver = document.getElementById('version');
-      var deb = document.getElementById('deb-count');
-      fetch('https://api.github.com/repos/ZoutMax/fifine-control-deck-linux/releases?per_page=100')
+      var el = document.getElementById('version');
+      if (!el) return;
+      fetch('https://api.github.com/repos/ZoutMax/fifine-control-deck-linux/releases/latest')
         .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (list) {
-          if (!Array.isArray(list) || !list.length) return;
-          var latest = list.filter(function (x) { return !x.draft && !x.prerelease; })[0] || list[0];
-          if (ver && latest && latest.tag_name) {
-            ver.textContent = 'Latest release ' + latest.tag_name;
-            if (latest.html_url) ver.href = latest.html_url;
-            ver.hidden = false;
+        .then(function (d) {
+          if (d && d.tag_name) {
+            el.textContent = 'Latest release ' + d.tag_name;
+            if (d.html_url) el.href = d.html_url;
+            el.hidden = false;
           }
-          var total = 0;
-          list.forEach(function (rel) {
-            (rel.assets || []).forEach(function (a) { total += (a.download_count || 0); });
-          });
-          if (deb && total > 0) { deb.textContent = ' · ' + total.toLocaleString() + ' downloads'; }
         })
-        .catch(function () { /* leave defaults on network error / API rate limit */ });
+        .catch(function () { /* leave hidden on network error / API rate limit */ });
     })();
   </script>
 </body>
