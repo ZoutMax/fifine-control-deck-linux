@@ -14,7 +14,7 @@ import shlex
 import shutil
 import subprocess
 import time
-from typing import Protocol
+from typing import Optional, Protocol
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +29,11 @@ IS_WAYLAND = bool(os.environ.get("WAYLAND_DISPLAY")) or \
 # `flatpak-spawn --host`. Detected once at import.
 IN_FLATPAK = os.path.exists("/.flatpak-info") or bool(os.environ.get("FLATPAK_ID"))
 _HOST_PREFIX = ["flatpak-spawn", "--host"]
+
+# Confined snap: USB access needs the raw-usb / hardware-observe interfaces,
+# which are manual-connect by default (a snap cannot connect them to itself),
+# so the device is inert until the user runs `snap connect`.
+IN_SNAP = bool(os.environ.get("SNAP") and os.environ.get("SNAP_NAME"))
 
 
 def _host(args):
@@ -391,4 +396,27 @@ def environment_summary() -> str:
     return (f"session={'wayland' if IS_WAYLAND else 'x11'} "
             f"audio={AUDIO or 'none'} keytool={KEY_TOOL or 'none'} "
             f"playerctl={'yes' if HAS_PLAYERCTL else 'no'}"
-            + (" [flatpak]" if IN_FLATPAK else ""))
+            + (" [flatpak]" if IN_FLATPAK else "")
+            + (" [snap]" if IN_SNAP else ""))
+
+
+def snap_usb_hint() -> Optional[str]:
+    """Guidance for granting a confined snap access to the USB device.
+
+    Returns None unless running as a snap. The device backend talks to the
+    keypad over libusb, which the `raw-usb` interface provides; `raw-usb` and
+    `hardware-observe` are manual-connect, so a fresh install cannot see the
+    device until the user connects them.
+    """
+    if not IN_SNAP:
+        return None
+    name = os.environ.get("SNAP_NAME", "fifine-control-deck")
+    return (
+        "This app is running as a snap, which sandboxes USB access.\n\n"
+        "If your device is plugged in but not detected, grant access from a "
+        "terminal and then restart the app:\n\n"
+        f"    sudo snap connect {name}:raw-usb\n"
+        f"    sudo snap connect {name}:hardware-observe\n\n"
+        "The “type password” action also needs the keyring interface:\n\n"
+        f"    sudo snap connect {name}:password-manager-service"
+    )

@@ -21,7 +21,8 @@ Recommends: playerctl,
             ydotool,
             wireplumber | pulseaudio-utils,
             xdg-utils,
-            python3-keyring
+            python3-keyring,
+            python3-pyudev
 Description: Control app for fifine / Stream Dock macro keypads
  A native Linux control application for the fifine Control Deck
  (Mirabox "Stream Dock" 293V3-family, USB 3142:0060). Draws icons and

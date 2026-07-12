@@ -9,7 +9,7 @@ from PyQt6.QtGui import QAction, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QGridLayout, QVBoxLayout, QHBoxLayout, QLabel,
     QComboBox, QPushButton, QSlider, QInputDialog, QMessageBox, QDockWidget,
-    QSystemTrayIcon, QMenu, QStatusBar, QScrollArea, QFileDialog,
+    QSystemTrayIcon, QMenu, QStatusBar, QScrollArea, QFileDialog, QCheckBox,
 )
 
 from .. import rendering, assets
@@ -651,6 +651,27 @@ class MainWindow(QMainWindow):
         if self.controller.connected and self.controller.device:
             fw = f"  fw={self.controller.device.firmware_version}"
         self.statusBar().showMessage(f"{state}{fw}   |   {environment_summary()}")
+
+    def maybe_show_snap_hint(self):
+        """Under a confined snap, if no device was found on startup, tell the
+        user how to grant USB access (the raw-usb interface is manual-connect,
+        so a fresh install can't see the device until it's connected)."""
+        from ..actions import snap_usb_hint
+        hint = snap_usb_hint()
+        if not hint or self.controller.connected or self.config.snap_hint_dismissed:
+            return
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle("No device detected")
+        box.setText("The fifine Control Deck was not detected.")
+        box.setInformativeText(hint)
+        dont_show = QCheckBox("Don't show this again")
+        box.setCheckBox(dont_show)
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
+        if dont_show.isChecked():
+            self.config.snap_hint_dismissed = True
+            self._queue_save()
 
     # -- misc --------------------------------------------------------------
     def _queue_save(self):

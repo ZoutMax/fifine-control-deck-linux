@@ -98,6 +98,10 @@ class DeckController:
         try:
             if not dev.open():
                 log.warning("open() failed (permissions? udev rule installed?)")
+                from .actions import snap_usb_hint
+                hint = snap_usb_hint()
+                if hint:
+                    log.warning("%s", hint)
                 return False
             dev.init()
             with self._lock:

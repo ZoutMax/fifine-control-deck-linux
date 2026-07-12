@@ -112,7 +112,7 @@ Section: utils
 Priority: optional
 Architecture: $ARCH
 Depends: python3 (>= 3.10), python3-pyqt6, python3-pil, libc6, libstdc++6, libgcc-s1 | libgcc1, libudev1
-Recommends: playerctl, ydotool, wireplumber | pulseaudio-utils, xdg-utils, python3-keyring
+Recommends: playerctl, ydotool, wireplumber | pulseaudio-utils, xdg-utils, python3-keyring, python3-pyudev
 Installed-Size: $INSTALLED_KB
 Maintainer: ZoutMax <danielhoutmann@hotmail.com>
 Homepage: https://github.com/ZoutMax/fifine-control-deck-linux

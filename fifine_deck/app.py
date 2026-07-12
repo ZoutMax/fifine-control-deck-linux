@@ -127,6 +127,10 @@ def run_gui(quit_flag: bool = False, hidden: bool = False) -> int:
     # start the device in the background (non-fatal if absent)
     controller.start()
     win._set_status()
+    # Under a confined snap with no device found, tell the user how to grant
+    # USB access (raw-usb is manual-connect and a snap can't self-connect it).
+    if not hidden:
+        win.maybe_show_snap_hint()
 
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     rc = app.exec()

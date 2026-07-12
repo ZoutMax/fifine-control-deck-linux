@@ -203,6 +203,7 @@ class DeckConfig:
     version: int = CONFIG_VERSION
     brightness: int = 80
     glow: bool = True          # glow a key on the device while it is pressed
+    snap_hint_dismissed: bool = False   # user ticked "don't show again" on the snap USB hint
     profiles: list[Profile] = field(default_factory=lambda: [Profile()])
     active_profile_id: str = ""
 
@@ -226,6 +227,7 @@ class DeckConfig:
             "version": self.version,
             "brightness": self.brightness,
             "glow": self.glow,
+            "snap_hint_dismissed": self.snap_hint_dismissed,
             "active_profile_id": self.active_profile_id,
             "profiles": [p.to_dict() for p in self.profiles],
         }
@@ -237,6 +239,7 @@ class DeckConfig:
             version=d.get("version", CONFIG_VERSION),
             brightness=int(d.get("brightness", 80)),
             glow=bool(d.get("glow", True)),
+            snap_hint_dismissed=bool(d.get("snap_hint_dismissed", False)),
             profiles=profiles,
             active_profile_id=d.get("active_profile_id", ""),
         )

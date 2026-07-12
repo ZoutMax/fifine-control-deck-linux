@@ -4,6 +4,18 @@ All notable changes to **fifine Control Deck** are documented here. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and the project
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.5] - 2026-07-12
+### Fixed
+- `.deb`/PPA packages now recommend **`python3-pyudev`**, restoring
+  netlink-based USB hotplug on fresh installs (previously the package omitted
+  it and silently fell back to polling).
+### Added
+- When running as a confined **snap** with no device detected, the app now
+  shows an in-app hint explaining how to grant USB access
+  (`sudo snap connect … raw-usb` / `hardware-observe`), with a
+  "don't show again" option — instead of appearing to do nothing.
+- `[snap]` marker in the status-bar environment summary.
+
 ## [0.5.4] - 2026-07-12
 ### Added
 - Unit + **controller test suite** with a mock-device harness (no hardware needed).
