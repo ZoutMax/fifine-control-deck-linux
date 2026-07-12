@@ -1,3 +1,9 @@
+fifine-control-deck (0.5.2ppa2) noble; urgency=medium
+
+  * Rebuild to add arm64 binary (arm64 now enabled on the PPA).
+
+ -- ZoutMax <150600436+ZoutMax@users.noreply.github.com>  Sun, 12 Jul 2026 04:45:38 +0200
+
 fifine-control-deck (0.5.2) noble; urgency=medium
 
   * PPA build of fifine Control Deck 0.5.2 (folders, multi-action editor,
