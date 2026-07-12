@@ -1,3 +1,9 @@
+fifine-control-deck (0.5.3ppa1) resolute; urgency=medium
+
+  * Build for Ubuntu 26.04 (resolute).
+
+ -- ZoutMax <150600436+ZoutMax@users.noreply.github.com>  Sun, 12 Jul 2026 10:49:02 +0200
+
 fifine-control-deck (0.5.3) noble; urgency=medium
 
   * Tests + ruff CI, AppStream metainfo, landing page, Flatpak scaffold
