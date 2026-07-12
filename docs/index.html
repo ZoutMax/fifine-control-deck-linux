@@ -148,6 +148,37 @@ sudo apt install fifine-control-deck</pre>
         })
         .catch(function () { /* leave hidden on network error / API rate limit */ });
     })();
+
+    // Auto-detect the visitor's CPU architecture and point the "Download .deb"
+    // button straight at the matching file. Falls back to the releases page
+    // (the HTML default) when the arch can't be determined, so an arm64 user is
+    // never silently handed an amd64 build.
+    (function () {
+      var btn = document.querySelector('.btn.deb');
+      if (!btn) return;
+      function setArch(arch) {
+        btn.href = 'https://github.com/ZoutMax/fifine-control-deck-linux/releases/latest/download/fifine-control-deck_' + arch + '.deb';
+        btn.textContent = 'Download .deb (' + arch + ')';
+      }
+      function fromUAString() {
+        var s = ((navigator.userAgent || '') + ' ' + (navigator.platform || '')).toLowerCase();
+        if (/aarch64|arm64|armv8/.test(s)) setArch('arm64');
+        else if (/x86_64|x86-64|amd64|win64|wow64|linux i|intel|x86/.test(s)) setArch('amd64');
+        /* else: unknown — leave the releases-page fallback in place */
+      }
+      // Chromium exposes the true CPU arch via high-entropy client hints; the UA
+      // string on Linux often lies (reports x86_64 on ARM), so prefer this.
+      var uaData = navigator.userAgentData;
+      if (uaData && uaData.getHighEntropyValues) {
+        uaData.getHighEntropyValues(['architecture', 'bitness']).then(function (h) {
+          if (h && h.architecture === 'arm' && h.bitness === '64') setArch('arm64');
+          else if (h && h.architecture === 'x86' && h.bitness === '64') setArch('amd64');
+          else fromUAString();
+        }).catch(fromUAString);
+      } else {
+        fromUAString();
+      }
+    })();
   </script>
 </body>
 </html>
