@@ -14,17 +14,20 @@ with profiles, multiple pages, a configuration GUI, and a system tray.
 ## Links
 
 - **Website:** <https://zoutmax.github.io/fifine-control-deck-linux/>
-- **Snap Store** (Ubuntu App Center): <https://snapcraft.io/fifine-control-deck>
-  — `sudo snap install fifine-control-deck`
-- **Launchpad PPA** (apt): <https://launchpad.net/~zoutmax/+archive/ubuntu/fifine>
-  — `sudo add-apt-repository ppa:zoutmax/fifine && sudo apt install fifine-control-deck`
+- **Launchpad PPA** (apt) — **recommended, drives the deck fully:**
+  `sudo add-apt-repository ppa:zoutmax/fifine && sudo apt install fifine-control-deck`
+  (<https://launchpad.net/~zoutmax/+archive/ubuntu/fifine>)
+- **Snap Store:** <https://snapcraft.io/fifine-control-deck> — ⚠️ the current
+  store snap is strict-confined and **opens but cannot yet control the deck**
+  (the deck needs `/dev/hidraw`, which strict confinement can't grant). A working
+  **classic** build is pending Snap Store review; until then use the PPA or `.deb`.
 - **Source (GitHub):** <https://github.com/ZoutMax/fifine-control-deck-linux>
   ([Releases](https://github.com/ZoutMax/fifine-control-deck-linux/releases) ·
   [Issues](https://github.com/ZoutMax/fifine-control-deck-linux/issues))
 - **Launchpad project:** <https://launchpad.net/fifine-control-deck>
   ([code mirror](https://code.launchpad.net/~zoutmax/fifine-control-deck/+git/fifine-control-deck-linux))
 
-Available for **amd64** and **arm64** on both channels.
+Available for **amd64** and **arm64** (PPA/`.deb` now; classic Snap pending review).
 
 ## Status: Alpha
 
