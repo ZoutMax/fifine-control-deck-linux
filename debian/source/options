@@ -1,0 +1,33 @@
+# dpkg-source options for this 3.0 (native) package.
+#
+# A native source package tars the ENTIRE working tree (dpkg-source does not
+# honour .gitignore), so local build outputs, caches and downloaded artifacts
+# would otherwise be swept into the .tar.xz — bloating the PPA source upload
+# (past uploads accidentally shipped dist/*.deb and a 90 MB *.snap). These
+# tar-ignore globs keep the source tarball limited to actual sources.
+#
+# NOTE: specifying tar-ignore replaces dpkg-source's default ignore list, so
+# the VCS/editor patterns are re-listed explicitly below.
+tar-ignore = .git
+tar-ignore = .git/*
+tar-ignore = .svn
+tar-ignore = CVS
+tar-ignore = .hg
+tar-ignore = .bzr
+tar-ignore = dist
+tar-ignore = build
+tar-ignore = .ruff_cache
+tar-ignore = .mypy_cache
+tar-ignore = .pytest_cache
+tar-ignore = __pycache__
+tar-ignore = *.py[co]
+tar-ignore = *.snap
+tar-ignore = *.deb
+tar-ignore = *.buildinfo
+tar-ignore = *.changes
+tar-ignore = snapcraft-*.txt
+tar-ignore = *.orig
+tar-ignore = *.rej
+tar-ignore = *~
+tar-ignore = .flatpak-builder
+tar-ignore = flatpak/.flatpak-builder
