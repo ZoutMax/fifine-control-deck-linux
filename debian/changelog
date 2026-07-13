@@ -1,3 +1,10 @@
+fifine-control-deck (0.5.7) noble; urgency=medium
+
+  * Classic-confinement snap that drives the deck, with a one-click
+    Enable-device-access button; packaging and docs
+
+ -- ZoutMax <150600436+ZoutMax@users.noreply.github.com>  Mon, 13 Jul 2026 23:22:27 +0200
+
 fifine-control-deck (0.5.6ppa1) resolute; urgency=medium
 
   * Rebuild of 0.5.6 for the zoutmax PPA (resolute).
