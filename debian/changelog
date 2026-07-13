@@ -1,3 +1,9 @@
+fifine-control-deck (0.5.7ppa1) resolute; urgency=medium
+
+  * Rebuild of 0.5.7 for the zoutmax PPA (resolute).
+
+ -- ZoutMax <danielhoutmann@hotmail.com>  Mon, 13 Jul 2026 23:25:28 +0200
+
 fifine-control-deck (0.5.7) noble; urgency=medium
 
   * Classic-confinement snap that drives the deck, with a one-click
