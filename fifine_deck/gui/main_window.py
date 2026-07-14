@@ -284,11 +284,11 @@ class MainWindow(QMainWindow):
             from PyQt6.QtDBus import QDBusConnection
             bus = QDBusConnection.sessionBus()
             iface = bus.interface()
-            for name in ("org.kde.StatusNotifierWatcher",
-                         "org.freedesktop.StatusNotifierWatcher"):
-                reply = iface.isServiceRegistered(name)
-                if reply.value():
-                    return True
+            if iface is not None:
+                for name in ("org.kde.StatusNotifierWatcher",
+                             "org.freedesktop.StatusNotifierWatcher"):
+                    if iface.isServiceRegistered(name).value():
+                        return True
         except Exception:
             pass
         return False

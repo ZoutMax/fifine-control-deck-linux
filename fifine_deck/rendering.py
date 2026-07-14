@@ -19,7 +19,7 @@ _FONT_CANDIDATES = [
 
 
 @lru_cache(maxsize=64)
-def _font(size: int) -> ImageFont.FreeTypeFont:
+def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     for path in _FONT_CANDIDATES:
         if os.path.exists(path):
             try:
@@ -88,7 +88,7 @@ def render_key(
         for i, line in enumerate(lines):
             bb = draw.textbbox((0, 0), line, font=font)
             w = bb[2] - bb[0]
-            x = (size - w) // 2 - bb[0]
+            x = int((size - w) // 2 - bb[0])
             y = y0 + i * line_h
             # subtle shadow for legibility over icons/backgrounds
             draw.text((x + 1, y + 1), line, font=font, fill=(0, 0, 0))

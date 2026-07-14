@@ -10,9 +10,15 @@ from PyQt6.QtWidgets import (
     QListWidgetItem, QAbstractItemView, QFrame, QApplication,
 )
 
+from typing import Callable
+
 from .. import rendering, assets
 from ..actions import ACTION_TYPES, ACTION_CATALOG
 from ..model import KeyConfig, KnobConfig, Action
+
+# Injected by the main window so action editors can offer a profile dropdown for
+# the "switch profile" action (avoids a widgets -> main_window import cycle).
+PROFILES_PROVIDER: Callable[[], object] | None = None
 
 MIME_ACTION = "application/x-fifine-action"
 MIME_KEY = "application/x-fifine-key"    # dragging a key to rearrange it
@@ -94,8 +100,9 @@ class ReorderDialog(QDialog):
         v.addLayout(row)
 
     def order(self) -> list[int]:
-        return [self.list.item(r).data(Qt.ItemDataRole.UserRole)
-                for r in range(self.list.count())]
+        return [it.data(Qt.ItemDataRole.UserRole)
+                for r in range(self.list.count())
+                if (it := self.list.item(r)) is not None]
 
 
 # ---------------------------------------------------------------------------

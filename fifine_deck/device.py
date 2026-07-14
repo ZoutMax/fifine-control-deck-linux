@@ -9,6 +9,7 @@ here is all that's needed to retune key count / size / orientation / mapping.
 from __future__ import annotations
 
 import os
+from typing import Any
 
 # Make the vendored backend importable no matter how we're launched.
 _BACKEND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend")
@@ -29,7 +30,7 @@ PID = 0x0060
 # ---------------------------------------------------------------------------
 # Editable device profile. Confirm with probe_device.py, then adjust.
 # ---------------------------------------------------------------------------
-DEVICE_PROFILE = {
+DEVICE_PROFILE: dict[str, Any] = {
     "name": "fifine Control Deck",
     "key_count": 15,
     "cols": 5,
