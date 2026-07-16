@@ -1,3 +1,9 @@
+fifine-control-deck (0.5.8ppa1) resolute; urgency=medium
+
+  * PPA build for resolute
+
+ -- ZoutMax <150600436+ZoutMax@users.noreply.github.com>  Fri, 17 Jul 2026 01:20:57 +0200
+
 fifine-control-deck (0.5.8) noble; urgency=medium
 
   * Security and data-safety release: udev uaccess fix, passwords off
