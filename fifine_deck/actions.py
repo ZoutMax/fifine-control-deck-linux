@@ -199,13 +199,21 @@ def _popen_detached(args, shell=False, host=False):
     )
 
 
-def _run(args, **kw):
+def _run(args, input_text: bytes | None = None, **kw):
     """subprocess.run with a timeout + error guard so a hung helper (wpctl,
-    playerctl, xdotool, …) can never freeze the action worker thread."""
+    playerctl, xdotool, …) can never freeze the action worker thread.
+
+    `input_text` is written to the child's stdin. Anything secret MUST travel
+    this way and never in `args`: /proc/<pid>/cmdline is world-readable, so a
+    password in argv is readable by every process on the machine (and by any
+    `ps`/monitoring sample) for the lifetime of the helper. The failure log
+    below prints the exception, which carries argv — another reason the secret
+    must not be there.
+    """
     kw.setdefault("timeout", 8)
     kw.setdefault("stderr", subprocess.DEVNULL)
     try:
-        subprocess.run(_host(args), **kw)
+        subprocess.run(_host(args), input=input_text, **kw)
     except Exception as e:
         log.warning("command failed: %s", e)
 
@@ -280,15 +288,27 @@ def _send_hotkey(combo: str) -> None:
 
 
 def _type_text(text: str) -> None:
+    """Type `text` into the focused window.
+
+    The text goes in on stdin, never argv. This is the same path the "type
+    password" action takes, and argv is world-readable through
+    /proc/<pid>/cmdline — putting the secret there would undo everything
+    secret_store.py does to keep it off disk. All three helpers support it:
+    xdotool and ydotool via `--file -`, wtype via a bare `-`.
+
+    Reading from stdin also disables ydotool's escape handling, so text is
+    typed literally (`\\n` stays two characters); a real newline still presses
+    Return, which is what the multi-line editor produces.
+    """
     if not KEY_TOOL:
         return
+    data = text.encode()
     if KEY_TOOL == "xdotool":
-        _run(["xdotool", "type", "--clearmodifiers", "--", text],
-                       stderr=subprocess.DEVNULL)
+        _run(["xdotool", "type", "--clearmodifiers", "--file", "-"], input_text=data)
     elif KEY_TOOL == "wtype":
-        _run(["wtype", "--", text], stderr=subprocess.DEVNULL)
+        _run(["wtype", "-"], input_text=data)
     elif KEY_TOOL == "ydotool":
-        _run(["ydotool", "type", "--", text], stderr=subprocess.DEVNULL)
+        _run(["ydotool", "type", "--file", "-"], input_text=data)
 
 
 def _close_app(target: str) -> None:

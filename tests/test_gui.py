@@ -171,6 +171,75 @@ def test_external_page_change_clears_a_stale_selection(win):
     assert w.selected_index is None
 
 
+# -- profile / config switches must reset folder navigation ------------------
+#
+# container() returns controller._container whenever it is non-None, so a stale
+# folder silently redirects EVERY later read: the page list, the previews, the
+# breadcrumb, what render_page() pushes to the deck, and where edits land. If
+# that folder belongs to a profile that is gone, edits go to an object no longer
+# reachable from config and are dropped on the next save — while the GUI reports
+# success. _del_profile and _on_profile_selected always called reset_nav();
+# these two paths didn't.
+
+def _enter_a_folder(cfg, c):
+    """Navigate the controller into a folder of the active profile."""
+    from fifine_deck.model import Folder
+    folder = Folder(name="Media")
+    cfg.active_profile().pages[0].key(1).folder = folder
+    c.enter_folder(folder)
+    assert c.container() is folder
+    return folder
+
+
+def test_adding_a_profile_leaves_the_folder_of_the_old_one(win, monkeypatch):
+    w, cfg, c = win
+    old_folder = _enter_a_folder(cfg, c)
+    monkeypatch.setattr(mw.QInputDialog, "getText", lambda *a, **k: ("Streaming", True))
+
+    w._add_profile()
+
+    assert c.container() is not old_folder      # not the discarded profile's
+    assert c.container() is cfg.active_profile()
+    assert c.at_root()
+    assert cfg.active_profile().name == "Streaming"
+
+
+def test_adding_a_profile_renders_the_new_one_to_the_deck(win, monkeypatch):
+    """Otherwise the deck keeps showing the previous profile's keys, so it lies
+    about what pressing them will do."""
+    w, cfg, c = win
+    c.device = MockDevice()
+    monkeypatch.setattr(mw.QInputDialog, "getText", lambda *a, **k: ("Streaming", True))
+    rendered = []
+    monkeypatch.setattr(c, "render_page", lambda: rendered.append(True))
+
+    w._add_profile()
+    assert rendered, "the deck was never re-rendered for the new profile"
+
+
+def test_importing_a_config_drops_navigation_into_the_discarded_one(win, monkeypatch, tmp_path):
+    w, cfg, c = win
+    orphan = _enter_a_folder(cfg, c)
+
+    # A valid config file to import.
+    from fifine_deck.model import DeckConfig
+    other = DeckConfig()
+    other.active_profile().name = "Imported"
+    path = tmp_path / "other.json"
+    other.save(str(path))
+
+    monkeypatch.setattr(mw.QFileDialog, "getOpenFileName",
+                        lambda *a, **k: (str(path), "JSON (*.json)"))
+    _AutoBox.answer = QMessageBox.StandardButton.Yes      # confirm the replace
+
+    w._import_config()
+
+    assert c.container() is not orphan
+    assert c.container() is cfg.active_profile()
+    assert c.at_root()
+    assert cfg.active_profile().name == "Imported"
+
+
 # -- snap device-access hint -------------------------------------------------
 
 def _snap(monkeypatch, hint="udev rule guidance", can_install=False):

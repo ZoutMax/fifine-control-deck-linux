@@ -6,6 +6,9 @@ into the wrong window. Every test stubs _run; nothing here touches the machine.
 """
 from __future__ import annotations
 
+import logging
+import subprocess
+
 import pytest
 
 from fifine_deck import actions
@@ -16,6 +19,16 @@ def ran(monkeypatch):
     """Capture argv lists handed to _run instead of executing them."""
     calls = []
     monkeypatch.setattr(actions, "_run", lambda args, **kw: calls.append(list(args)))
+    return calls
+
+
+@pytest.fixture
+def ran_full(monkeypatch):
+    """Capture both argv and stdin payload handed to _run."""
+    calls = []
+    monkeypatch.setattr(actions, "_run",
+                        lambda args, input_text=None, **kw:
+                            calls.append((list(args), input_text)))
     return calls
 
 
@@ -122,16 +135,30 @@ def test_hotkey_wtype_maps_super_to_logo(ran, monkeypatch):
 
 # -- typing -----------------------------------------------------------------
 
-@pytest.mark.parametrize("tool, expected", [
-    ("xdotool", ["xdotool", "type", "--clearmodifiers", "--", "-hi there"]),
-    ("wtype", ["wtype", "--", "-hi there"]),
-    ("ydotool", ["ydotool", "type", "--", "-hi there"]),
+@pytest.mark.parametrize("tool, expected_argv", [
+    ("xdotool", ["xdotool", "type", "--clearmodifiers", "--file", "-"]),
+    ("wtype", ["wtype", "-"]),
+    ("ydotool", ["ydotool", "type", "--file", "-"]),
 ])
-def test_type_text_passes_text_after_a_double_dash(ran, monkeypatch, tool, expected):
-    """The `--` matters: text starting with '-' must not be parsed as a flag."""
+def test_type_text_feeds_the_text_on_stdin(ran_full, monkeypatch, tool, expected_argv):
+    """Every backend must read the text from stdin. Text starting with '-' also
+    can't be mistaken for a flag this way."""
     monkeypatch.setattr(actions, "KEY_TOOL", tool)
     actions._type_text("-hi there")
-    assert ran == [expected]
+    assert ran_full == [(expected_argv, b"-hi there")]
+
+
+@pytest.mark.parametrize("tool", ["xdotool", "wtype", "ydotool"])
+def test_typed_text_never_reaches_argv(ran_full, monkeypatch, tool):
+    """The security property, stated directly: the 'type password' action goes
+    through here, and /proc/<pid>/cmdline is world-readable — so the text must
+    appear nowhere in the argv of any backend."""
+    monkeypatch.setattr(actions, "KEY_TOOL", tool)
+    secret = "correct horse battery staple"
+    actions._type_text(secret)
+    argv, stdin = ran_full[0]
+    assert all(secret not in a for a in argv)
+    assert stdin == secret.encode()
 
 
 def test_type_text_needs_a_tool(ran, monkeypatch):
@@ -224,3 +251,25 @@ def test_run_applies_a_timeout_by_default(monkeypatch):
                         lambda args, **kw: seen.update(kw))
     actions._run(["true"])
     assert seen["timeout"] == 8
+
+
+def test_run_forwards_the_stdin_payload(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(actions.subprocess, "run",
+                        lambda args, **kw: seen.update(args=args, **kw))
+    actions._run(["cat"], input_text=b"payload")
+    assert seen["input"] == b"payload"
+
+
+def test_run_failure_log_cannot_leak_the_stdin_payload(monkeypatch, caplog):
+    """A hung helper raises TimeoutExpired, whose message carries argv, and the
+    guard logs it — straight into the systemd journal. That is exactly why the
+    secret goes on stdin: there is nothing to redact."""
+    def boom(args, **kw):
+        raise subprocess.TimeoutExpired(args, 8)
+
+    monkeypatch.setattr(actions.subprocess, "run", boom)
+    with caplog.at_level(logging.WARNING):
+        actions._run(["ydotool", "type", "--file", "-"], input_text=b"hunter2")
+    assert caplog.text                      # it did log the failure…
+    assert "hunter2" not in caplog.text     # …but the secret isn't in it

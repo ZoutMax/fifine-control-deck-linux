@@ -27,4 +27,8 @@ def _isolate_config(tmp_path, monkeypatch):
     monkeypatch.setattr(model, "CONFIG_DIR", str(cfgdir))
     monkeypatch.setattr(model, "CONFIG_PATH", str(cfgdir / "config.json"))
     monkeypatch.setattr(model, "ICONS_DIR", str(cfgdir / "icons"))
+    # This only works because save()/load() resolve CONFIG_PATH at call time.
+    # If either goes back to `path: str = CONFIG_PATH`, the default binds at
+    # import and every default-path save escapes this sandbox — onto the real
+    # ~/.config/fifine-control-deck. test_model.py pins that; don't remove it.
     yield

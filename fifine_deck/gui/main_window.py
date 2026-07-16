@@ -153,7 +153,11 @@ class MainWindow(QMainWindow):
         self.config.glow = imported.glow
         self.config.profiles = imported.profiles
         self.config.active_profile_id = imported.active_profile_id
-        self.controller.page_index = 0
+        # reset_nav, not page_index=0: if we were inside a folder, _container
+        # still points at a Folder from the profiles we just discarded. It is
+        # unreachable from self.config, so every later edit would preview fine,
+        # report success, and be dropped on the next save.
+        self.controller.reset_nav()
         self.glow_act.setChecked(self.config.glow)
         self.bright.setValue(self.config.brightness)
         self._reload_profiles()
@@ -415,9 +419,15 @@ class MainWindow(QMainWindow):
             p = Profile(name=name)
             self.config.profiles.append(p)
             self.config.active_profile_id = p.id
-            self.controller.page_index = 0
+            # reset_nav, not page_index=0: if we were inside a folder, the
+            # controller still holds that folder from the OLD profile, so every
+            # read (previews, page list, edits) would go to the old profile
+            # while the combo shows the new one. Then render so the deck shows
+            # the profile we just switched to. Same as _del_profile.
+            self.controller.reset_nav()
             self._reload_profiles()
             self._refresh_all_previews()
+            self.controller.render_page()
             self._queue_save()
 
     def _rename_profile(self):

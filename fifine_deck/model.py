@@ -245,17 +245,29 @@ class DeckConfig:
         )
         return cfg
 
-    def save(self, path: str = CONFIG_PATH) -> None:
+    def save(self, path: Optional[str] = None) -> None:
+        # Resolved here, not as a default argument: a default binds CONFIG_PATH
+        # at import, so redirecting it later (as the tests do) would silently
+        # miss every save() call that relies on the default.
+        path = path or CONFIG_PATH
         ensure_dirs()
         tmp = path + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(self.to_dict(), f, indent=2)
-        os.replace(tmp, path)
-        # The config can hold secrets (password actions); keep it private.
+        # The config can hold secrets (a password action falls back to storing
+        # the value here when no keyring is available), so create the file
+        # private from the start. Writing it 0644 and chmod'ing afterwards
+        # leaves a window in which any local user can read it.
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+            with os.fdopen(fd, "w") as f:
+                json.dump(self.to_dict(), f, indent=2)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        # os.replace carries the temp file's 0600 mode onto the real path.
+        os.replace(tmp, path)
 
     @staticmethod
     def looks_like_config(data) -> bool:
@@ -272,7 +284,8 @@ class DeckConfig:
         return True
 
     @classmethod
-    def load(cls, path: str = CONFIG_PATH) -> "DeckConfig":
+    def load(cls, path: Optional[str] = None) -> "DeckConfig":
+        path = path or CONFIG_PATH          # resolved at call time; see save()
         if not os.path.exists(path):
             cfg = cls()
             cfg.save(path)

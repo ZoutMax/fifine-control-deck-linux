@@ -91,3 +91,43 @@ def test_save_is_private(tmp_path):
     DeckConfig().save(p)
     mode = os.stat(p).st_mode & 0o777
     assert mode == 0o600
+
+
+def test_save_is_private_from_the_first_byte(tmp_path, monkeypatch):
+    """The config can hold a plaintext password (the fallback when no keyring
+    is available). Creating it 0644 and chmod'ing to 0600 afterwards leaves a
+    window in which any local user can read the secret, so the temp file must
+    be created private — not fixed up later."""
+    modes = []
+    real_open = os.open
+
+    def spy(path, flags, mode=0o777, *a, **kw):
+        if str(path).endswith(".tmp"):
+            modes.append(mode)
+        return real_open(path, flags, mode, *a, **kw)
+
+    monkeypatch.setattr(os, "open", spy)
+    DeckConfig().save(str(tmp_path / "c.json"))
+    assert modes, "save() no longer creates its temp file via os.open"
+    assert all(m == 0o600 for m in modes), f"temp file created {modes!r}, not 0600"
+
+
+def test_default_config_path_is_resolved_at_call_time(tmp_path, monkeypatch):
+    """conftest keeps tests off the real ~/.config by redirecting
+    model.CONFIG_PATH. That only works if save()/load() read the module global
+    when called: `def save(self, path=CONFIG_PATH)` binds at import, so the
+    redirect would be ignored and a default-path save would hit the user's own
+    configuration. This test is the tripwire for that regression."""
+    from fifine_deck import model
+
+    target = tmp_path / "redirected" / "config.json"
+    monkeypatch.setattr(model, "CONFIG_DIR", str(target.parent))
+    monkeypatch.setattr(model, "CONFIG_PATH", str(target))
+    monkeypatch.setattr(model, "ICONS_DIR", str(target.parent / "icons"))
+
+    cfg = DeckConfig()
+    cfg.active_profile().name = "Redirected"
+    cfg.save()                                   # no path -> must use the global
+
+    assert target.exists(), "save() ignored the redirected CONFIG_PATH"
+    assert DeckConfig.load().active_profile().name == "Redirected"
