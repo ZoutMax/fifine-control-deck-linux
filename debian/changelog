@@ -1,3 +1,9 @@
+fifine-control-deck (0.6.2ppa1) resolute; urgency=medium
+
+  * PPA build of 0.6.2 for resolute
+
+ -- ZoutMax <150600436+ZoutMax@users.noreply.github.com>  Sat, 18 Jul 2026 12:25:28 +0200
+
 fifine-control-deck (0.6.2) noble; urgency=medium
 
   * Icon picks stick for good (provenance tracking) plus a 25-fix editor
