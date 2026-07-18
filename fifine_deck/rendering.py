@@ -11,9 +11,15 @@ from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
+# Cover the common layouts: Debian/Ubuntu (truetype/…), Fedora and the
+# Flatpak runtimes (dejavu/…, liberation-fonts/…), Arch (TTF/…). Missing all
+# of them silently degrades to Pillow's tiny bitmap font — which is exactly
+# what happened in the Flatpak sandbox before the runtime paths were added.
 _FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/liberation-fonts/LiberationSans-Bold.ttf",
     "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
 ]
 

@@ -17,7 +17,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
-CONFIG_DIR = os.path.expanduser("~/.config/fifine-control-deck")
+# XDG_CONFIG_HOME matters: under Flatpak it points into ~/.var/app/<id>/,
+# and hardcoding ~/.config there writes into the sandbox's throwaway home —
+# the config would silently vanish on every restart.
+CONFIG_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+    "fifine-control-deck")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 ICONS_DIR = os.path.join(CONFIG_DIR, "icons")
 CONFIG_VERSION = 1

@@ -146,3 +146,21 @@ def test_default_config_path_is_resolved_at_call_time(tmp_path, monkeypatch):
 
     assert target.exists(), "save() ignored the redirected CONFIG_PATH"
     assert DeckConfig.load().active_profile().name == "Redirected"
+
+
+def test_config_dir_honors_xdg_config_home(monkeypatch):
+    """Under Flatpak XDG_CONFIG_HOME points into ~/.var/app/<id>/; hardcoding
+    ~/.config there writes into the sandbox's throwaway home and the config
+    vanishes on restart (found during Flathub packaging)."""
+    import importlib
+    from fifine_deck import model as m
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/xdg/base")
+    importlib.reload(m)
+    try:
+        assert m.CONFIG_DIR == "/xdg/base/fifine-control-deck"
+        monkeypatch.delenv("XDG_CONFIG_HOME")
+        importlib.reload(m)
+        assert m.CONFIG_DIR == os.path.expanduser("~/.config/fifine-control-deck")
+    finally:
+        monkeypatch.undo()
+        importlib.reload(m)
