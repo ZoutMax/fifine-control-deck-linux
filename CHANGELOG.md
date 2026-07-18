@@ -4,7 +4,7 @@ All notable changes to **fifine Control Deck** are documented here. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and the project
 follows [Semantic Versioning](https://semver.org/).
 
-## [0.8.0] - Unreleased
+## [0.8.0] - 2026-07-19
 ### Added
 - **Press-and-hold key actions** (#4): every key can carry a second action
   that fires after holding it ~0.5 s — long-press *Back* to exit a folder,
