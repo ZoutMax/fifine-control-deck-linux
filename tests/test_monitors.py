@@ -634,3 +634,289 @@ def test_vram_retry_probe_is_not_cached(monkeypatch):
     spec = MonitorSpec.from_params({"metric": "vram"})
     assert not s.sample(spec).ok
     assert s._vram_backend is None
+
+
+# ---------------------------------------------------------------------------
+# 0.7.0 metrics: GPU load, temperatures, clock (issue #3)
+# ---------------------------------------------------------------------------
+def test_gpu_none_backend_degrades(monkeypatch):
+    monkeypatch.setattr(monitors, "_probe_gpu", lambda: ("none",))
+    r = Sampler().sample(MonitorSpec.from_params({"metric": "gpu"}))
+    assert not r.ok and r.text == "n/a"
+
+
+def test_gpu_amdgpu_sysfs_backend(tmp_path, monkeypatch):
+    busy = tmp_path / "gpu_busy_percent"
+    busy.write_text("37\n")
+    monkeypatch.setattr(monitors, "_probe_gpu", lambda: ("amdgpu", str(busy)))
+    r = Sampler().sample(MonitorSpec.from_params({"metric": "gpu"}))
+    assert r.ok and r.pct == pytest.approx(37.0)
+    assert r.text == "37%" and r.sample == pytest.approx(37.0)
+
+
+def test_gpu_nvml_backend(monkeypatch):
+    rates = namedtuple("rates", "gpu memory")(62, 40)
+
+    class _NVML:
+        def nvmlDeviceGetUtilizationRates(self, handle):
+            assert handle == "h0"
+            return rates
+
+    monkeypatch.setattr(monitors, "_probe_gpu", lambda: ("nvml", _NVML(), "h0"))
+    r = Sampler().sample(MonitorSpec.from_params({"metric": "gpu"}))
+    assert r.ok and r.pct == pytest.approx(62.0) and r.text == "62%"
+
+
+def test_gpu_backend_death_reprobes_next_sample(tmp_path, monkeypatch):
+    """Mirror of the VRAM lifecycle: a dead backend degrades to n/a, drops the
+    cache, and the NEXT sample re-probes instead of warning forever."""
+    busy = tmp_path / "gpu_busy_percent"
+    busy.write_text("10")
+    s = Sampler()
+    monkeypatch.setattr(monitors, "_probe_gpu", lambda: ("amdgpu", str(busy)))
+    spec = MonitorSpec.from_params({"metric": "gpu"})
+    assert s.sample(spec).ok
+    busy.unlink()                                # driver unloaded under us
+    assert not s.sample(spec).ok
+    assert s._gpu_backend is None                # cache dropped -> re-probe
+    busy.write_text("55")
+    assert s.sample(spec).pct == pytest.approx(55.0)
+
+
+def test_gpu_retry_probe_is_not_cached(monkeypatch):
+    calls = []
+    def probe():
+        calls.append(1)
+        return ("retry",)
+    monkeypatch.setattr(monitors, "_probe_gpu", probe)
+    s = Sampler()
+    spec = MonitorSpec.from_params({"metric": "gpu"})
+    assert not s.sample(spec).ok
+    assert not s.sample(spec).ok
+    assert len(calls) == 2 and s._gpu_backend is None
+
+
+_shw = namedtuple("shwtemp", "label current high critical")
+
+
+def _fake_temps(monkeypatch, mapping):
+    class _P:
+        @staticmethod
+        def sensors_temperatures():
+            return mapping
+    monkeypatch.setattr(monitors, "psutil", _P)
+
+
+def test_temp_auto_prefers_cpu_package(monkeypatch):
+    _fake_temps(monkeypatch, {
+        "nvme": [_shw("Composite", 33.0, None, None)],
+        "coretemp": [_shw("Core 0", 50.0, None, None),
+                     _shw("Package id 0", 40.0, None, None)],
+    })
+    r = Sampler().sample(MonitorSpec.from_params({"metric": "temp"}))
+    assert r.ok and r.text == "40°C" and r.sub == "Package id 0"
+    assert r.pct == pytest.approx(40.0) and r.sample == pytest.approx(40.0)
+
+
+def test_temp_auto_amd_tctl_when_no_coretemp(monkeypatch):
+    _fake_temps(monkeypatch, {
+        "acpitz": [_shw("", 27.8, None, None)],
+        "k10temp": [_shw("Tctl", 48.5, None, None)],
+    })
+    r = Sampler().sample(MonitorSpec.from_params({"metric": "temp"}))
+    assert r.text == "48°C" and r.sub == "Tctl"
+
+
+def test_temp_target_selects_chip_and_label(monkeypatch):
+    _fake_temps(monkeypatch, {
+        "coretemp": [_shw("Package id 0", 40.0, None, None)],
+        "nvme": [_shw("Composite", 33.0, None, None),
+                 _shw("Sensor 2", 41.0, None, None)],
+    })
+    s = Sampler()
+    r = s.sample(MonitorSpec.from_params({"metric": "temp", "target": "nvme"}))
+    assert r.text == "33°C" and r.sub == "Composite"
+    r = s.sample(MonitorSpec.from_params({"metric": "temp",
+                                          "target": "NVMe:sen"}))
+    assert r.text == "41°C" and r.sub == "Sensor 2"    # case-insensitive TRUE prefix
+    r = s.sample(MonitorSpec.from_params({"metric": "temp",
+                                          "target": "nvme:comp"}))
+    assert r.text == "33°C" and r.sub == "Composite"
+
+
+def test_temp_unknown_target_and_no_sensors_degrade(monkeypatch):
+    _fake_temps(monkeypatch, {"coretemp": [_shw("Package id 0", 40.0, None, None)]})
+    s = Sampler()
+    r = s.sample(MonitorSpec.from_params({"metric": "temp", "target": "gpu0"}))
+    assert not r.ok and r.text == "n/a"
+    _fake_temps(monkeypatch, {})
+    r = s.sample(MonitorSpec.from_params({"metric": "temp"}))
+    assert not r.ok and "no temp sensors" in r.sub
+
+
+def test_temp_gauge_pct_is_clamped_but_sample_is_raw(monkeypatch):
+    _fake_temps(monkeypatch, {"coretemp": [_shw("Package id 0", 105.7, None, None)]})
+    r = Sampler().sample(MonitorSpec.from_params({"metric": "temp"}))
+    assert r.pct == 100.0                        # gauge axis is 0..100
+    assert r.sample == pytest.approx(105.7)      # graph keeps the real value
+    assert r.text == "106°C"
+
+
+def test_temp_keeps_its_target_in_the_spec():
+    spec = MonitorSpec.from_params({"metric": "temp", "target": "nvme"})
+    assert spec.target == "nvme"
+    assert spec.key() == ("temp", "nvme")        # separate stream per sensor
+
+
+def test_clock_formats_follow_the_interval(monkeypatch):
+    import time as _time
+    fixed = _time.struct_time((2026, 7, 18, 13, 57, 4, 5, 199, 1))
+    monkeypatch.setattr(monitors.time, "localtime", lambda: fixed)
+    s = Sampler()
+    r = s.sample(MonitorSpec.from_params({"metric": "clock"}))
+    assert r.text == "13:57:04"                  # fast refresh shows seconds
+    assert r.pct is None and r.sample is None and "18" in r.sub
+    r = s.sample(MonitorSpec.from_params({"metric": "clock", "interval": "30"}))
+    assert r.text == "13:57"                     # slow refresh drops them
+
+
+def test_clock_needs_no_psutil(monkeypatch):
+    monkeypatch.setattr(monitors, "psutil", None)
+    r = Sampler().sample(MonitorSpec.from_params({"metric": "clock"}))
+    assert r.ok and r.text
+
+
+def test_new_metrics_are_offered_in_the_editor_choice():
+    spec = dict(ACTION_TYPES)["monitor"]["params"]
+    metric_kinds = [k for key, k, _ in spec if key == "metric"]
+    for m in ("gpu", "temp", "clock"):
+        assert m in metric_kinds[0]
+
+
+@pytest.mark.parametrize("metric", ["gpu", "temp", "clock"])
+@pytest.mark.parametrize("style", ["number", "gauge", "graph"])
+def test_new_metrics_render_in_every_style(metric, style):
+    spec = MonitorSpec.from_params({"metric": metric, "style": style})
+    reading = Reading(41.0, "41", "x", sample=41.0) if metric != "clock" \
+        else Reading(None, "13:57", "Sat 18 Jul")
+    img = render_monitor(96, spec, reading, history=[10.0, None, 41.0])
+    assert img.size == (96, 96) and img.mode == "RGB"
+    # and it actually drew the reading — a blank key must not pass
+    bg = img.load()[0, 0]
+    assert any(img.load()[x, y] != bg
+               for x in range(0, 96, 2) for y in range(0, 96, 2))
+
+
+def test_gauge_value_text_is_arm_length_readable():
+    """0.6.0's gauge value (20% of key size) read small on the deck — issue #3
+    asks for ~26%. Measure the rendered glyph height of the pure-white value
+    text: at size 100 the taller face must span >= 17 rows (the old face
+    peaked around 14). Fails on the 0.6.2 renderer."""
+    spec = MonitorSpec(metric="cpu", style="gauge")
+    img = render_monitor(100, spec, Reading(50.0, "50%", sample=50.0))
+    px = img.load()
+    white_rows = [y for y in range(100)
+                  if any(px[x, y] == (255, 255, 255) for x in range(100))]
+    assert white_rows, "value text missing from the gauge face"
+    span = max(white_rows) - min(white_rows) + 1
+    assert span >= 17, f"gauge value text only spans {span} rows"
+
+
+def test_gauge_label_moved_into_the_bottom_opening():
+    """The metric label now sits in the 270°-arc's bottom gap (y ~= 0.84),
+    not inside the arc where it crowded the value."""
+    spec = MonitorSpec(metric="cpu", style="gauge")
+    img = render_monitor(100, spec, Reading(50.0, "50%", sample=50.0))
+    px = img.load()
+    bg, fg = (16, 16, 32), (255, 255, 255)
+    dim = tuple(int(bg[i] + (fg[i] - bg[i]) * 0.55) for i in range(3))
+    # single dim pixels also appear as antialias blends of the big white
+    # value text — the label proper produces DENSE dim rows (>= 4 px)
+    dim_rows = [y for y in range(100)
+                if sum(px[x, y] == dim for x in range(100)) >= 4]
+    assert dim_rows and min(dim_rows) >= 80, f"label rows: {dim_rows[:5]}..."
+
+
+# ---------------------------------------------------------------------------
+# 0.7.0 audit findings (regressions pinned)
+# ---------------------------------------------------------------------------
+class _DeadNVML:
+    """pynvml imports fine (it is pure Python) but init fails — the permanent
+    state of every AMD-only machine with the recommended package installed."""
+    @staticmethod
+    def nvmlInit():
+        raise RuntimeError("NVML library not found")
+
+
+def test_probe_gpu_falls_back_to_amdgpu_when_nvml_is_dead(tmp_path, monkeypatch):
+    """deb Recommends / snap bundles pynvml unconditionally, so on AMD systems
+    the import succeeds and nvmlInit() fails forever — the sysfs backend must
+    still be found (the buggy probe returned ("retry",) forever instead)."""
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "pynvml", _DeadNVML)
+    busy = tmp_path / "gpu_busy_percent"
+    busy.write_text("55\n")
+    monkeypatch.setattr(monitors.glob, "glob",
+                        lambda pat: [str(busy)] if "gpu_busy_percent" in pat else [])
+    assert monitors._probe_gpu() == ("amdgpu", str(busy))
+    r = Sampler().sample(MonitorSpec.from_params({"metric": "gpu"}))
+    assert r.ok and r.pct == pytest.approx(55.0)
+
+
+def test_probe_gpu_retry_only_when_nvml_present_and_no_amdgpu(monkeypatch):
+    import sys as _sys
+    monkeypatch.setattr(monitors.glob, "glob", lambda pat: [])
+    monkeypatch.setitem(_sys.modules, "pynvml", _DeadNVML)
+    assert monitors._probe_gpu() == ("retry",)
+    monkeypatch.setitem(_sys.modules, "pynvml", None)     # import -> ImportError
+    assert monitors._probe_gpu() == ("none",)
+
+
+def test_probe_vram_falls_back_to_amdgpu_when_nvml_is_dead(tmp_path, monkeypatch):
+    """_probe_vram shipped the same NVML-shadows-amdgpu flaw since 0.6.0."""
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "pynvml", _DeadNVML)
+    total = tmp_path / "mem_info_vram_total"
+    used = tmp_path / "mem_info_vram_used"
+    total.write_text("1000")
+    used.write_text("250")
+    monkeypatch.setattr(monitors.glob, "glob",
+                        lambda pat: [str(total)] if "vram_total" in pat else [])
+    assert monitors._probe_vram() == ("amdgpu", str(used), str(total))
+    monkeypatch.setattr(monitors.glob, "glob", lambda pat: [])
+    assert monitors._probe_vram() == ("retry",)
+
+
+def test_clock_format_bands_do_not_share_a_stream(monkeypatch):
+    """The clock Reading bakes in its format (seconds under 5 s), so clocks in
+    different bands must have different stream keys — with a shared stream a
+    30 s key froze another key's seconds display on its LCD."""
+    fast = MonitorSpec.from_params({"metric": "clock"})               # 1 s
+    slow = MonitorSpec.from_params({"metric": "clock", "interval": "30"})
+    same_band = MonitorSpec.from_params({"metric": "clock", "interval": "2"})
+    assert fast.key() != slow.key()
+    assert fast.key() == same_band.key()                  # cheap sharing kept
+    import time as _time
+    fixed = _time.struct_time((2026, 7, 18, 13, 57, 4, 5, 199, 1))
+    monkeypatch.setattr(monitors.time, "localtime", lambda: fixed)
+    s = Sampler()
+    assert s.sample(fast).text == "13:57:04"
+    assert s.last(slow).text != "13:57:04"    # slow stream untouched
+    assert s.sample(slow).text == "13:57"
+
+
+def test_gauge_value_never_overdraws_the_arc():
+    """Audit finding: at 26% a 4+ glyph value ("100%", any temp reading) was
+    wider than the arc's inner opening and painted across the stroke on both
+    sides. The value text (pure white) must stay inside the inner opening —
+    long values shrink, they don't collide."""
+    for text, pct in (("100%", 100.0), ("100°C", 100.0), ("78°C", 78.0)):
+        spec = MonitorSpec(metric="temp", style="gauge")
+        img = render_monitor(100, spec, Reading(pct, text, sample=pct))
+        px = img.load()
+        white_cols = [x for x in range(100)
+                      if any(px[x, y] == (255, 255, 255) for y in range(100))]
+        assert white_cols, text
+        # inner opening at size 100: margin 10 + stroke 9 per side -> 19..81
+        assert min(white_cols) >= 19 and max(white_cols) <= 81, \
+            f"{text}: value spans columns {min(white_cols)}..{max(white_cols)}"

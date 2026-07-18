@@ -60,13 +60,16 @@ The core is feature-complete and hardened, but it's early. Realistic expectation
   switch profile, next/previous profile (Scene Shift), and multi-step actions.
   Key actions run on a worker thread, so a slow/delayed macro never blocks the
   keypad.
-- **System-monitor keys** — a key can show live **CPU, RAM, VRAM, network or
-  disk-space** readouts (like the official app's widgets), as a big number, a
-  gauge (percentage metrics; a network key falls back to the number face), or
-  a scrolling graph, with a configurable refresh interval. Keys
-  showing the same metric share one sample stream. VRAM is best-effort per GPU
-  vendor (NVIDIA via NVML — needs `python3-pynvml`; AMD via sysfs; Intel iGPUs
-  share system RAM so there is nothing to show).
+- **System-monitor keys** — a key can show live **CPU, RAM, VRAM, GPU load,
+  temperature, network or disk-space** readouts (like the official app's
+  widgets) — or a **clock** — as a big number, a gauge (a network key falls
+  back to the number face), or a scrolling graph, with a configurable refresh
+  interval. Keys showing the same metric share one sample stream. Temperature
+  keys pick the CPU package sensor by default; the target field selects any
+  other `psutil` sensor as `chip` or `chip:label` (e.g. `nvme:Composite`).
+  VRAM and GPU load are best-effort per GPU vendor (NVIDIA via NVML — needs
+  `python3-pynvml`; AMD via sysfs; Intel iGPUs share system RAM so there is
+  nothing to show).
 - **Knob/dial support** (press / rotate-left / rotate-right) on devices that
   have dials.
 - Multiple **profiles**, each with multiple **pages**, plus **folders** —

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import logging
 import signal
 import sys
@@ -38,7 +39,13 @@ def _signal_existing(command: str) -> bool:
     return True
 
 
-AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/fifine-control-deck.desktop")
+def autostart_file() -> str:
+    """The XDG autostart entry path. Honors XDG_CONFIG_HOME (outside Flatpak
+    that is the user's real ~/.config; inside it points into the sandbox,
+    which is why the Flatpak path uses the Background portal instead)."""
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return os.path.join(base, "autostart", "fifine-control-deck.desktop")
+
 
 _AUTOSTART_ENTRY = """[Desktop Entry]
 Type=Application
@@ -51,20 +58,147 @@ X-GNOME-Autostart-enabled=true
 """
 
 
-def set_autostart(enable: bool) -> int:
+def set_autostart(enable: bool, config=None) -> int:
+    """Enable/disable start-on-login. Returns 0 on success, non-zero when the
+    request was denied (Flatpak portal) so the GUI can revert its toggle.
+
+    Outside a sandbox this writes/removes the XDG autostart .desktop entry.
+    Inside Flatpak that file would land in the sandbox home and never run, so
+    the request goes through the org.freedesktop.portal.Background portal,
+    which manages a host-side autostart entry on our behalf.
+
+    The portal has no query API, so DeckConfig.autostart_enabled is the
+    toggle's only memory of the granted state. The GUI passes its live
+    `config` (and persists it itself); the CLI passes none, so a granted
+    request is persisted here — otherwise `--enable-autostart` would leave
+    the next GUI launch showing a stale toggle.
+    """
+    from .actions import IN_FLATPAK
+    if IN_FLATPAK:
+        if _portal_autostart(enable):
+            state = "enabled" if enable else "disabled"
+            print(f"Autostart {state} via the Background portal.")
+            if config is not None:
+                config.autostart_enabled = enable      # caller persists
+            else:
+                from .model import DeckConfig
+                cfg = DeckConfig.load()
+                cfg.autostart_enabled = enable
+                cfg.save()
+            return 0
+        print("The desktop denied the Background-portal autostart request.")
+        return 1
+    path = autostart_file()
     if enable:
-        os.makedirs(os.path.dirname(AUTOSTART_FILE), exist_ok=True)
-        with open(AUTOSTART_FILE, "w") as f:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
             f.write(_AUTOSTART_ENTRY)
-        print(f"Autostart enabled: {AUTOSTART_FILE}")
+        print(f"Autostart enabled: {path}")
         print("The deck will run (hidden) on login; open the window by launching the app.")
     else:
         try:
-            os.remove(AUTOSTART_FILE)
+            os.remove(path)
             print("Autostart disabled.")
         except FileNotFoundError:
             print("Autostart was not enabled.")
     return 0
+
+
+_portal_token_seq = itertools.count()
+
+
+def _portal_autostart(enable: bool) -> bool:
+    """Ask the XDG Background portal to (un)register login autostart.
+
+    Blocks on a nested event loop until the portal's async Response arrives
+    (usually instant; some desktops show a consent dialog). Returns True when
+    the request was granted. Needs a Qt application object — the GUI always
+    has one; the CLI path creates one and HOLDS it (an unreferenced
+    QCoreApplication is destroyed immediately by PyQt, which kills both the
+    event loop and the timeout guard).
+    """
+    from PyQt6.QtCore import (QCoreApplication, QEventLoop, QMetaType,
+                              QObject, QTimer, pyqtSlot)
+    from PyQt6.QtDBus import (QDBusArgument, QDBusConnection, QDBusInterface,
+                              QDBusMessage)
+
+    app = QCoreApplication.instance()
+    if app is None:
+        app = QCoreApplication(sys.argv[:1])    # held until we return (CLI)
+    _ = app
+    bus = QDBusConnection.sessionBus()
+    if not bus.isConnected():
+        log.warning("portal autostart: no D-Bus session bus")
+        return False
+
+    # The portal replies via a Response signal on a Request object whose path
+    # is predictable from our unique name + handle_token — subscribe BEFORE
+    # calling so a fast reply cannot be missed (the spec's documented race).
+    # The token must be unique per request: two in-flight requests sharing a
+    # path would adopt each other's responses.
+    token = f"fifinedeck{os.getpid()}_{next(_portal_token_seq)}"
+    sender = bus.baseService().lstrip(":").replace(".", "_")
+    req_path = f"/org/freedesktop/portal/desktop/request/{sender}/{token}"
+
+    loop = QEventLoop()
+
+    class _Responder(QObject):
+        granted = False
+        answered = False
+
+        @pyqtSlot(QDBusMessage)
+        def handle(self, msg: QDBusMessage) -> None:
+            args = msg.arguments()
+            code = int(args[0]) if args else 1
+            results = args[1] if len(args) > 1 and isinstance(args[1], dict) else {}
+            ok = code == 0
+            if enable and "autostart" in results:
+                ok = ok and bool(results["autostart"])
+            self.answered = True
+            self.granted = ok
+            loop.quit()
+
+    responder = _Responder()
+    bus.connect("org.freedesktop.portal.Desktop", req_path,
+                "org.freedesktop.portal.Request", "Response",
+                responder.handle)
+    try:
+        iface = QDBusInterface("org.freedesktop.portal.Desktop",
+                               "/org/freedesktop/portal/desktop",
+                               "org.freedesktop.portal.Background", bus)
+        reply = iface.call("RequestBackground", "", {
+            "handle_token": token,
+            "reason": "Start the deck controller on login",
+            "autostart": enable,
+            # Explicitly typed as a string array: PyQt6 otherwise marshals a
+            # Python list as 'av', and xdg-desktop-portal's strict option
+            # filter rejects the whole call ("expected 'as', found 'av'").
+            # stubs mistype the enum's .value; the wire type is pinned by
+            # tests/test_portal_wire.py against a validating fake portal
+            "commandline": QDBusArgument(["fifine-control-deck", "--hidden"],
+                                         QMetaType.Type.QStringList.value),  # type: ignore[call-overload]
+            "dbus-activatable": False,
+        })
+        if reply.errorName():
+            log.warning("portal autostart: %s", reply.errorMessage())
+            return False
+
+        # 30 s guards against a portal that never answers; a visible consent
+        # dialog quits the loop the moment the user decides.
+        QTimer.singleShot(30_000, loop.quit)
+        loop.exec()
+        if not responder.answered:
+            # Timed out. Close the pending Request so a LATE "Allow" in a
+            # still-open consent dialog cannot flip host state that our
+            # toggle/config no longer track (the portal has no query API).
+            QDBusInterface("org.freedesktop.portal.Desktop", req_path,
+                           "org.freedesktop.portal.Request", bus).call("Close")
+            log.warning("portal autostart: no response from the portal (30s)")
+        return responder.granted
+    finally:
+        bus.disconnect("org.freedesktop.portal.Desktop", req_path,
+                       "org.freedesktop.portal.Request", "Response",
+                       responder.handle)
 
 
 def run_gui(quit_flag: bool = False, hidden: bool = False) -> int:

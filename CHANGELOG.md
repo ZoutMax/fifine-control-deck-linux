@@ -4,6 +4,32 @@ All notable changes to **fifine Control Deck** are documented here. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and the project
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - Unreleased
+### Added
+- **Monitor keys, round 2** (#3): **GPU load** (NVIDIA via NVML, AMD via
+  sysfs `gpu_busy_percent` — same graceful per-vendor detection as VRAM) and
+  **temperatures** (any `psutil` sensor; auto-picks the CPU package, or set
+  the target to `chip` / `chip:label`, e.g. `nvme:Composite`) as new metrics,
+  plus a simple **clock key** (time + date; shows seconds at refresh
+  intervals under 5 s).
+- **Flatpak: "Start on login" now works.** Inside the sandbox the toggle used
+  to write a `.desktop` file into the sandbox home — a silent no-op. It now
+  asks the XDG **Background portal**; if the desktop denies the request the
+  toggle reverts and says why instead of pretending.
+### Changed
+- **Gauge face is readable at arm's length**: the value text grew from 20% to
+  26% of the key size and the metric label moved out of the arc into the
+  gauge's bottom opening (live-dogfooding feedback from the physical deck).
+- Autostart entry path honors `XDG_CONFIG_HOME` instead of hardcoding
+  `~/.config`.
+### Fixed
+- **VRAM metric no longer dead on AMD systems.** pynvml is installed by
+  default (deb Recommends, snap bundles it) and imports fine without an
+  NVIDIA driver — the probe treated any NVML failure as "retry later" and
+  never reached the working amdgpu sysfs backend. NVML failure now falls
+  through to sysfs (flaw carried since 0.6.0; the new GPU-load metric uses
+  the corrected probe from the start).
+
 ## [0.6.2] - 2026-07-18
 ### Fixed
 - **Icons finally keep the one you picked.** 0.6.1's fix was incomplete: an

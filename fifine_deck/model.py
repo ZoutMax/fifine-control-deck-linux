@@ -209,6 +209,10 @@ class DeckConfig:
     brightness: int = 80
     glow: bool = True          # glow a key on the device while it is pressed
     snap_hint_dismissed: bool = False   # user ticked "don't show again" on the snap USB hint
+    # Flatpak only: last granted portal autostart state. The Background portal
+    # has no query API, so this is the toggle's memory between runs (outside
+    # Flatpak the autostart .desktop file's existence is the truth instead).
+    autostart_enabled: bool = False
     profiles: list[Profile] = field(default_factory=lambda: [Profile()])
     active_profile_id: str = ""
 
@@ -233,6 +237,7 @@ class DeckConfig:
             "brightness": self.brightness,
             "glow": self.glow,
             "snap_hint_dismissed": self.snap_hint_dismissed,
+            "autostart_enabled": self.autostart_enabled,
             "active_profile_id": self.active_profile_id,
             "profiles": [p.to_dict() for p in self.profiles],
         }
@@ -245,6 +250,7 @@ class DeckConfig:
             brightness=int(d.get("brightness", 80)),
             glow=bool(d.get("glow", True)),
             snap_hint_dismissed=bool(d.get("snap_hint_dismissed", False)),
+            autostart_enabled=bool(d.get("autostart_enabled", False)),
             profiles=profiles,
             active_profile_id=d.get("active_profile_id", ""),
         )

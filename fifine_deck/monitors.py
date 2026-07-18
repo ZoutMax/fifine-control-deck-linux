@@ -1,10 +1,12 @@
 """
-System-monitor keys: live CPU / RAM / VRAM / network / disk readouts rendered
-onto a key's LCD (like the monitor widgets in the official Stream Dock app).
+System-monitor keys: live CPU / RAM / VRAM / GPU / temperature / network /
+disk readouts — plus a clock face — rendered onto a key's LCD (like the
+monitor widgets in the official Stream Dock app).
 
 Two halves:
-- Sampler   — polls the metrics (psutil for CPU/RAM/disk/network, per-vendor
-              sources for VRAM) and keeps the short history a sparkline needs.
+- Sampler   — polls the metrics (psutil for CPU/RAM/disk/network/temps,
+              per-vendor sources for VRAM and GPU load) and keeps the short
+              history a sparkline needs.
 - render_monitor — draws a Reading as a key image in one of three styles
               (number / gauge / graph), reusing the app font + colour helpers.
 
@@ -37,12 +39,19 @@ METRICS = {
     "cpu": "CPU",
     "ram": "RAM",
     "vram": "VRAM",
+    "gpu": "GPU",
+    "temp": "TEMP",
     "net": "NET",
     "disk": "DISK",
+    "clock": "CLOCK",
 }
 STYLES = ("number", "gauge", "graph")
-PERCENT_METRICS = frozenset({"cpu", "ram", "vram", "disk"})
-TARGETED_METRICS = frozenset({"disk", "net"})   # the only metrics a target applies to
+# Metrics on a fixed 0..100 axis (gauge + graph scale). temp is °C, not a
+# percentage, but shares the axis: 0-100°C covers consumer hardware and the
+# 90 warn threshold doubles as a sensible thermal alarm.
+PERCENT_METRICS = frozenset({"cpu", "ram", "vram", "gpu", "disk", "temp"})
+# the only metrics a target applies to (disk mount, net iface, temp sensor)
+TARGETED_METRICS = frozenset({"disk", "net", "temp"})
 
 HISTORY_LEN = 32             # sparkline points kept per metric
 
@@ -100,6 +109,11 @@ class MonitorSpec:
         optimisation — cpu_percent and net counters are since-last-call
         deltas, so sampling a stream twice in quick succession returns
         garbage (~0) to the second caller."""
+        if self.metric == "clock":
+            # A clock Reading bakes in its text format (seconds only under a
+            # 5 s interval), so clocks in different format bands must not
+            # share one Reading — a 30 s key would freeze a seconds display.
+            return ("clock", "sec" if self.interval < 5 else "min")
         return (self.metric, self.target)
 
 
@@ -130,6 +144,7 @@ class Sampler:
         self._last: dict[tuple, Reading] = {}
         self._net_prev: dict[str, tuple[float, int, int]] = {}
         self._vram_backend = None      # probed lazily; ("none",) when absent
+        self._gpu_backend = None       # same lifecycle as _vram_backend
         # psutil keys its cpu_percent since-last-call baseline PER THREAD, so
         # priming must be per thread too — a flag primed on one thread would
         # let another thread's first (garbage) reading through as real.
@@ -240,32 +255,137 @@ class Sampler:
         return Reading(pct, f"{pct:.0f}%",
                        f"{_fmt_bytes(used)} / {_fmt_bytes(total)}", sample=pct)
 
+    def _sample_gpu(self, spec: MonitorSpec) -> Reading:
+        b = self._gpu_backend
+        if b is None:
+            b = _probe_gpu()
+            if b[0] != "retry":
+                # "retry" is NOT cached — probe again next sample (see vram).
+                self._gpu_backend = b
+        if b[0] not in ("nvml", "amdgpu"):
+            return Reading(None, "n/a", "no dedicated GPU", ok=False)
+        try:
+            if b[0] == "nvml":
+                pct = float(b[1].nvmlDeviceGetUtilizationRates(b[2]).gpu)
+            else:
+                with open(b[1]) as f:
+                    pct = float(f.read())
+        except Exception:
+            # backend died (driver unload / hot-remove): re-probe next sample
+            self._gpu_backend = None
+            raise
+        return Reading(pct, f"{pct:.0f}%", "load", sample=pct)
+
+    def _sample_temp(self, spec: MonitorSpec) -> Reading:
+        if psutil is None:
+            return _NO_PSUTIL
+        temps: dict = getattr(psutil, "sensors_temperatures", lambda: {})() or {}
+        picked = _pick_temp(temps, spec.target)
+        if picked is None:
+            return Reading(None, "n/a",
+                           f"no sensor {spec.target}" if spec.target
+                           else "no temp sensors", ok=False)
+        label, val = picked
+        # °C on the shared 0..100 gauge axis; graph records the raw value
+        pct = max(0.0, min(100.0, val))
+        return Reading(pct, f"{val:.0f}°C", label, sample=val)
+
+    def _sample_clock(self, spec: MonitorSpec) -> Reading:
+        # No psutil needed. Seconds only at fast refresh — at slow intervals a
+        # seconds display would just show a stale value between pushes.
+        now = time.localtime()
+        fmt = "%H:%M:%S" if spec.interval < 5 else "%H:%M"
+        return Reading(None, time.strftime(fmt, now),
+                       time.strftime("%a %d %b", now))
+
 
 _NO_PSUTIL = Reading(None, "n/a", "psutil missing", ok=False)
+
+# Chips whose first matching entry is the CPU-package temperature, in
+# preference order (Intel, AMD, AMD-alt, ARM SBCs, ACPI fallback).
+_TEMP_PREFERRED = ("coretemp", "k10temp", "zenpower", "cpu_thermal", "acpitz")
+
+
+def _pick_temp(temps: dict, target: str) -> tuple[str, float] | None:
+    """Pick one (label, current °C) from psutil.sensors_temperatures().
+
+    target "" = auto: prefer a CPU package sensor, else the first chip that
+    reports anything. Explicit targets select "chip" or "chip:label"
+    (case-insensitive, label matched by prefix — "nvme:comp" hits Composite).
+    """
+    if target:
+        chip, _, want = target.partition(":")
+        chip, want = chip.strip().lower(), want.strip().lower()
+        for name, entries in temps.items():
+            if name.lower() != chip:
+                continue
+            for e in entries:
+                lbl = (getattr(e, "label", "") or "").lower()
+                if not want or lbl.startswith(want):
+                    return (getattr(e, "label", "") or name, float(e.current))
+        return None
+    for chip in _TEMP_PREFERRED:
+        for name, entries in temps.items():
+            if name.lower() == chip and entries:
+                e = _pkg_entry(entries)
+                return (getattr(e, "label", "") or name, float(e.current))
+    for name, entries in temps.items():
+        if entries:
+            e = entries[0]
+            return (getattr(e, "label", "") or name, float(e.current))
+    return None
+
+
+def _pkg_entry(entries):
+    """The package/whole-die entry of a CPU chip, else its first entry."""
+    for e in entries:
+        lbl = (getattr(e, "label", "") or "").lower()
+        if lbl.startswith(("package", "tctl", "tdie")):
+            return e
+    return entries[0]
 
 
 def _probe_vram():
     """Find a VRAM source: NVIDIA via NVML, AMD via sysfs, else none.
     Intel iGPUs share system RAM — there is nothing meaningful to report.
-    Returns ("retry",) when NVML is installed but not ready (e.g. the driver
-    is still loading) — the caller re-probes on the next sample instead of
-    caching a permanent failure."""
-    pynvml = None
+
+    NVML failing does NOT mean no GPU: pynvml is pure Python (the deb
+    Recommends it, the snap bundles it), so on AMD-only machines the import
+    succeeds and nvmlInit() raises library-not-found forever. The amdgpu
+    sysfs probe therefore runs on ANY NVML failure — ("retry",) is only
+    returned when NVML failed AND no amdgpu node exists (e.g. an NVIDIA
+    driver still loading), so the caller re-probes instead of caching a
+    permanent failure."""
+    nvml_present = False
     try:
         import pynvml
-    except ImportError:
+        nvml_present = True
+        pynvml.nvmlInit()
+        return ("nvml", pynvml, pynvml.nvmlDeviceGetHandleByIndex(0))
+    except Exception:
         pass
-    if pynvml is not None:
-        try:
-            pynvml.nvmlInit()
-            return ("nvml", pynvml, pynvml.nvmlDeviceGetHandleByIndex(0))
-        except Exception:
-            return ("retry",)
     for total in sorted(glob.glob("/sys/class/drm/card*/device/mem_info_vram_total")):
         used = os.path.join(os.path.dirname(total), "mem_info_vram_used")
         if os.path.exists(used):
             return ("amdgpu", used, total)
-    return ("none",)
+    return ("retry",) if nvml_present else ("none",)
+
+
+def _probe_gpu():
+    """Find a GPU-load source: NVIDIA via NVML utilization rates, AMD via the
+    sysfs gpu_busy_percent file. Same fallback/retry semantics as
+    _probe_vram (see there for why amdgpu must run after an NVML failure)."""
+    nvml_present = False
+    try:
+        import pynvml
+        nvml_present = True
+        pynvml.nvmlInit()
+        return ("nvml", pynvml, pynvml.nvmlDeviceGetHandleByIndex(0))
+    except Exception:
+        pass
+    for busy in sorted(glob.glob("/sys/class/drm/card*/device/gpu_busy_percent")):
+        return ("amdgpu", busy)
+    return ("retry",) if nvml_present else ("none",)
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +413,15 @@ def render_monitor(size: int, spec: MonitorSpec, reading: Reading,
 
     if style == "gauge":
         _draw_gauge(draw, size, reading.pct or 0.0, accent, _mix(bg, fg, 0.18))
-        _center_text(draw, reading.text, size, size * 0.44, int(size * 0.20), fg)
-        _center_text(draw, label, size, size * 0.66, int(size * 0.11), dim)
+        # Value text fills the arc (26% of key size, up from 20%) — the 0.6.0
+        # face read small at arm's length on the physical deck. The label
+        # moves into the gauge's bottom opening instead of crowding the arc.
+        # Width is capped to the arc's INNER opening (0.62·size: margin 0.10 +
+        # stroke 0.09 per side), not the key width — at 26% a 4+ glyph value
+        # like "100%" or any "…°C" reading would overdraw the arc stroke.
+        _center_text(draw, reading.text, size, size * 0.36, int(size * 0.26),
+                     fg, max_w=int(size * 0.62))
+        _center_text(draw, label, size, size * 0.84, int(size * 0.11), dim)
     elif style == "graph":
         _center_text(draw, label, size, size * 0.06, int(size * 0.11), dim)
         _center_text(draw, reading.text, size, size * 0.18, int(size * 0.17), fg)
@@ -308,11 +435,13 @@ def render_monitor(size: int, spec: MonitorSpec, reading: Reading,
     return img
 
 
-def _center_text(draw, text: str, size: int, y: float, fs: int, fill):
+def _center_text(draw, text: str, size: int, y: float, fs: int, fill,
+                 max_w: int | None = None):
     if not text:
         return
     fs = max(8, fs)
-    while fs > 8 and draw.textlength(text, font=_font(fs)) > size - 6:
+    limit = max_w if max_w is not None else size - 6
+    while fs > 8 and draw.textlength(text, font=_font(fs)) > limit:
         fs -= 1
     font = _font(fs)
     bb = draw.textbbox((0, 0), text, font=font)

@@ -933,3 +933,87 @@ def test_autosave_failure_is_visible_and_quit_still_stops(win, monkeypatch):
     monkeypatch.setattr(QApplication, "quit", staticmethod(lambda: None))
     w._quit()                                       # must not raise either
     assert stopped, "quit aborted before stopping the controller"
+
+
+# -- autostart toggle (0.7.0) -------------------------------------------------
+
+def test_autostart_denial_reverts_the_toggle(win, monkeypatch):
+    """A Background-portal denial must not leave the menu claiming autostart
+    is on — the toggle reverts and the status bar says why."""
+    w, cfg, c = win
+    monkeypatch.setattr("fifine_deck.app.set_autostart", lambda on, config=None: 1)
+    # baseline: unchecked, regardless of this machine's real autostart file
+    w.autostart_act.blockSignals(True)
+    w.autostart_act.setChecked(False)
+    w.autostart_act.blockSignals(False)
+    w.autostart_act.setChecked(True)              # user toggles on
+    assert not w.autostart_act.isChecked()        # denied -> reverted
+    assert cfg.autostart_enabled is False
+    assert "denied" in w.statusBar().currentMessage().lower()
+
+
+def test_autostart_grant_under_flatpak_is_persisted(win, monkeypatch):
+    """The portal has no query API, so a granted request must be recorded on
+    the live config AND queued for saving — that's what re-checks the toggle
+    on the next launch. The real set_autostart runs (only the portal call is
+    mocked) so this pins the product's persistence, not a stub's."""
+    w, cfg, c = win
+    monkeypatch.setattr("fifine_deck.app._portal_autostart", lambda enable: True)
+    monkeypatch.setattr("fifine_deck.actions.IN_FLATPAK", True)
+    saves = []
+    monkeypatch.setattr(w, "_queue_save", lambda: saves.append(1))
+    w.autostart_act.blockSignals(True)
+    w.autostart_act.setChecked(False)             # machine-independent baseline
+    w.autostart_act.blockSignals(False)
+    w.autostart_act.setChecked(True)
+    assert cfg.autostart_enabled is True
+    assert saves, "granted state was never queued for saving"
+    w.autostart_act.setChecked(False)             # the toggle-OFF path too
+    assert cfg.autostart_enabled is False
+    assert len(saves) == 2
+
+
+def test_autostart_toggle_restores_flatpak_state_on_next_launch(qapp, monkeypatch):
+    """Construction-time state: under Flatpak the toggle must read the
+    persisted config flag (the portal cannot be queried). This is the
+    'next launch' half of the feature."""
+    monkeypatch.setattr(mw, "QMessageBox", _AutoBox)   # dialogs must not block
+    monkeypatch.setattr("fifine_deck.actions.IN_FLATPAK", True)
+    cfg = DeckConfig(autostart_enabled=True)
+    c = DeckController(cfg)
+    w = mw.MainWindow(cfg, c)
+    try:
+        assert w.autostart_act.isChecked()
+    finally:
+        w.close(); c.stop(); QApplication.processEvents()
+    cfg2 = DeckConfig(autostart_enabled=False)
+    c2 = DeckController(cfg2)
+    w2 = mw.MainWindow(cfg2, c2)
+    try:
+        assert not w2.autostart_act.isChecked()
+    finally:
+        w2.close(); c2.stop(); QApplication.processEvents()
+
+
+def test_autostart_toggle_reads_the_entry_file_outside_flatpak(qapp, tmp_path, monkeypatch):
+    monkeypatch.setattr(mw, "QMessageBox", _AutoBox)   # dialogs must not block
+    monkeypatch.setattr("fifine_deck.actions.IN_FLATPAK", False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    from fifine_deck.app import autostart_file
+    cfg = DeckConfig()
+    c = DeckController(cfg)
+    w = mw.MainWindow(cfg, c)
+    try:
+        assert not w.autostart_act.isChecked()    # no entry file yet
+    finally:
+        w.close(); c.stop(); QApplication.processEvents()
+    import os as _os
+    _os.makedirs(_os.path.dirname(autostart_file()), exist_ok=True)
+    open(autostart_file(), "w").write("[Desktop Entry]\n")
+    cfg2 = DeckConfig()
+    c2 = DeckController(cfg2)
+    w2 = mw.MainWindow(cfg2, c2)
+    try:
+        assert w2.autostart_act.isChecked()
+    finally:
+        w2.close(); c2.stop(); QApplication.processEvents()

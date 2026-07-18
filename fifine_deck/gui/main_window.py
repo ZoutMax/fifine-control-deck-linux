@@ -95,12 +95,17 @@ class MainWindow(QMainWindow):
         m.addAction(export_act)
         m.addAction(import_act)
         m.addSeparator()
-        # Start on login (hidden) toggle
+        # Start on login (hidden) toggle. Outside Flatpak the .desktop file's
+        # existence is the state; the Background portal has no query API, so
+        # under Flatpak the last granted state is remembered in the config.
         import os as _os
-        from ..app import AUTOSTART_FILE, set_autostart
+        from ..actions import IN_FLATPAK as _in_flatpak
+        from ..app import autostart_file
         self.autostart_act = QAction("Start on login (hidden)", self, checkable=True)
-        self.autostart_act.setChecked(_os.path.exists(AUTOSTART_FILE))
-        self.autostart_act.toggled.connect(lambda on: set_autostart(on))
+        self.autostart_act.setChecked(
+            self.config.autostart_enabled if _in_flatpak
+            else _os.path.exists(autostart_file()))
+        self.autostart_act.toggled.connect(self._set_autostart)
         m.addAction(self.autostart_act)
         # Glow-on-press toggle
         self.glow_act = QAction("Flash key on press", self, checkable=True)
@@ -113,6 +118,35 @@ class MainWindow(QMainWindow):
     def _set_glow(self, on: bool):
         self.config.glow = bool(on)
         self._queue_save()
+
+    def _set_autostart(self, on: bool):
+        from ..actions import IN_FLATPAK
+        from ..app import set_autostart
+        # The portal request nests an event loop (a consent dialog can hold it
+        # open for seconds) — disable the action so a second click can't issue
+        # a concurrent request that would adopt this one's response.
+        self.autostart_act.setEnabled(False)
+        try:
+            # Pass the live config: set_autostart records the granted state on
+            # it (a disk load in there would clobber unsaved in-memory edits).
+            ok = set_autostart(on, self.config) == 0
+        finally:
+            self.autostart_act.setEnabled(True)
+        if ok:
+            if IN_FLATPAK:
+                self._queue_save()
+            return
+        # Denied or unanswered (Flatpak Background portal): revert the toggle
+        # without re-triggering this handler, and say why.
+        self.autostart_act.blockSignals(True)
+        self.autostart_act.setChecked(not on)
+        self.autostart_act.blockSignals(False)
+        bar = self.statusBar()
+        if bar is not None:
+            bar.showMessage(
+                "Autostart was denied (or not answered) by the desktop's "
+                "Background portal — check the system's application "
+                "permissions.", 8000)
 
     # -- config export / import -------------------------------------------
     def _export_config(self):
