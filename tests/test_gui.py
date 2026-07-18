@@ -480,3 +480,62 @@ def test_ok_without_clicking_enable_installs_nothing(win, monkeypatch):
     _AutoBox.click_text = None            # user just dismissed the dialog
     w.maybe_show_snap_hint()
     assert calls == []
+
+
+# ---------------------------------------------------------------------------
+# Icon library: picking an icon must stick (user-reported, 0.6.0)
+# ---------------------------------------------------------------------------
+def _editor_with_key(action_type, params, icon_name):
+    from fifine_deck.gui.widgets import ActionEditor
+    from fifine_deck.model import KeyConfig, Action
+    from fifine_deck import assets
+    kc = KeyConfig()
+    kc.action = Action(action_type, dict(params))
+    kc.icon = assets.library_ref(icon_name)
+    ed = ActionEditor()
+    ed.set_key(kc, 1)
+    return ed, kc
+
+
+def test_library_icon_choice_is_not_overwritten(qapp):
+    """Picking an icon in the Library dialog set icon_edit, which re-ran the
+    'icon follows the action' logic and instantly restored the action's
+    default icon — so choosing any library icon appeared to do nothing."""
+    from fifine_deck import assets
+    ed, kc = _editor_with_key("launch_app", {"command": "obs"}, "home")
+    ed.icon_edit.setText(assets.library_ref("star"))     # what _pick_library does
+    assert ed.icon_edit.text() == assets.library_ref("star")
+    assert kc.icon == assets.library_ref("star")
+
+
+def test_icon_still_follows_a_changed_action(qapp):
+    """The auto-icon feature itself must survive the fix: switching the
+    volume sub-command still swaps the (unmodified) library icon."""
+    from fifine_deck import assets
+    ed, kc = _editor_with_key("volume", {"cmd": "up"}, "volume_up")
+    combo = ed.params._params["cmd"]
+    combo.setCurrentIndex(combo.findText("mute"))
+    assert kc.action.params["cmd"] == "mute"
+    assert kc.icon == assets.library_ref("mute")
+
+
+def test_custom_file_icon_is_never_auto_replaced(qapp, tmp_path):
+    from fifine_deck.gui.widgets import ActionEditor
+    from fifine_deck.model import KeyConfig, Action
+    custom = str(tmp_path / "mine.png")
+    kc = KeyConfig()
+    kc.action = Action("volume", {"cmd": "up"})
+    kc.icon = custom
+    ed = ActionEditor()
+    ed.set_key(kc, 1)
+    combo = ed.params._params["cmd"]
+    combo.setCurrentIndex(combo.findText("mute"))
+    assert kc.icon == custom
+
+
+def test_editing_label_does_not_touch_a_chosen_icon(qapp):
+    from fifine_deck import assets
+    ed, kc = _editor_with_key("launch_app", {"command": "obs"}, "star")
+    ed.label_edit.setText("Streaming")
+    assert kc.icon == assets.library_ref("star")
+    assert kc.label == "Streaming"

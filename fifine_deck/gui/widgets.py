@@ -591,6 +591,10 @@ class ActionEditor(QWidget):
         self._kc: KeyConfig | None = None
         self._index: int | None = None
         self._building = False
+        # Signature of the action as of the last edit, so we can tell an
+        # action change (icon should follow) from an icon/label/colour edit
+        # (icon must NOT be touched). See _on_edit.
+        self._last_action_sig: tuple | None = None
 
         root = QVBoxLayout(self)
         header = QHBoxLayout()
@@ -649,7 +653,14 @@ class ActionEditor(QWidget):
         self.bg_btn.set_color(kc.bg_color)
         self.fg_btn.set_color(kc.text_color)
         self.params.set_action(kc.action)
+        self._last_action_sig = self._action_sig(kc.action)
         self._building = False
+
+    @staticmethod
+    def _action_sig(action: Action) -> tuple:
+        """Cheap comparable identity of an action (params may hold lists)."""
+        return (action.type,
+                tuple(sorted((k, str(v)) for k, v in action.params.items())))
 
     def clear(self):
         self._kc = None
@@ -691,10 +702,16 @@ class ActionEditor(QWidget):
             return
         from ..actions import default_icon_for
         new_action = self.params.get_action()
+        sig = self._action_sig(new_action)
+        action_changed = sig != self._last_action_sig
+        self._last_action_sig = sig
         # Make the icon follow the action's sub-command (up/down/mute, etc.),
-        # but never overwrite a custom icon the user chose via File…
+        # but only when the ACTION actually changed. This used to run on every
+        # edit, so the icon the user had just chosen in the Library dialog was
+        # instantly overwritten with the action's default — picking any library
+        # icon appeared to do nothing. A custom File… icon is never touched.
         cur_icon = self.icon_edit.text()
-        if not cur_icon or assets.is_library_icon(cur_icon):
+        if action_changed and (not cur_icon or assets.is_library_icon(cur_icon)):
             want = assets.library_ref(default_icon_for(new_action)[0])
             if want and want != cur_icon:
                 self._building = True
