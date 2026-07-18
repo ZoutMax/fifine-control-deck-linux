@@ -54,6 +54,12 @@ PROFILES_PROVIDER: Callable[[], object] | None = None
 # on rebuilds. Returns a PIL image, or None to fall back to the placeholder.
 MONITOR_PREVIEW_PROVIDER: Callable[[KeyConfig, int], object] | None = None
 
+# Injected by the main window: the id of the page currently shown in the
+# grid. Stamped into key-drag payloads so a drop that lands after the page
+# changed underneath the drag (an action can switch pages mid-drag) is
+# rejected instead of rearranging the wrong page's keys.
+CURRENT_PAGE_ID_PROVIDER: Callable[[], str] | None = None
+
 # One cleartext-fallback warning per app run (see _warn_plaintext_once).
 _PLAINTEXT_WARNED = False
 
@@ -218,7 +224,11 @@ class KeyButton(QToolButton):
             return super().mouseMoveEvent(e)
         drag = QDrag(self)
         mime = QMimeData()
-        mime.setData(MIME_KEY, str(self.index).encode())
+        provider = globals().get("CURRENT_PAGE_ID_PROVIDER")
+        page_id = provider() if provider else ""
+        # index + the page the drag STARTED on — QDrag.exec runs a nested
+        # event loop, so an action can switch pages before the drop lands.
+        mime.setData(MIME_KEY, f"{self.index}:{page_id}".encode())
         drag.setMimeData(mime)
         pm = self.icon().pixmap(QSize(self._size, self._size))
         if not pm.isNull():
@@ -242,7 +252,16 @@ class KeyButton(QToolButton):
         self.setStyleSheet(self._base_qss)
         md = e.mimeData()
         if md.hasFormat(MIME_KEY):
-            src = int(bytes(md.data(MIME_KEY)).decode())
+            payload = bytes(md.data(MIME_KEY)).decode()
+            src_s, _, page_id = payload.partition(":")
+            src = int(src_s)
+            provider = globals().get("CURRENT_PAGE_ID_PROVIDER")
+            cur_page = provider() if provider else ""
+            if page_id and cur_page and page_id != cur_page:
+                # The page changed mid-drag; applying the swap here would
+                # rearrange the wrong page's keys.
+                e.ignore()
+                return
             if src != self.index:
                 self.keyMoved.emit(src, self.index)
             e.acceptProposedAction()
@@ -296,6 +315,7 @@ class ActionParamsWidget(QWidget):
         self._exclude = set(exclude or [])
         self._params: dict[str, QWidget] = {}
         self._multi_editor = None
+        self._orig_action = Action()      # last action given to set_action
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         # Owned by self so it outlives the combos it filters.
@@ -314,21 +334,33 @@ class ActionParamsWidget(QWidget):
 
     def set_action(self, action: Action):
         self._building = True
+        # Keep the stored action verbatim: an action type this build does not
+        # know (config written by a newer version) must round-trip untouched,
+        # not be downgraded to the combo's first entry on the next edit.
+        self._orig_action = Action(action.type, dict(action.params))
         i = self.type_combo.findData(action.type)
-        if i < 0 and action.type in ACTION_TYPES:
-            # A persisted action whose type this editor normally excludes
-            # (e.g. a monitor bound to a knob/step before the exclusion
-            # existed). Show it rather than falling back to index 0 — that
-            # fallback silently rewrote the stored action to the combo's
-            # first entry on the next unrelated edit.
-            self.type_combo.addItem(ACTION_TYPES[action.type]["label"], action.type)
+        if i < 0:
+            # Either a type this editor normally excludes (e.g. a monitor
+            # bound to a knob/step before the exclusion existed) or a type
+            # from a newer build. Show it rather than falling back to index
+            # 0 — that fallback silently rewrote the stored action.
+            label = ACTION_TYPES.get(action.type, {}).get("label", action.type)
+            self.type_combo.addItem(label, action.type)
             i = self.type_combo.findData(action.type)
         self.type_combo.setCurrentIndex(max(0, i))
         self._build(action.type, action.params)
         self._building = False
 
-    def get_action(self) -> Action:
-        return Action(self.type_combo.currentData(), self._collect())
+    def get_action(self, peek: bool = False) -> Action:
+        """The action as the widgets show it. `peek` guarantees NO side
+        effects (no keyring writes, no warning dialogs) — use it for
+        baselines/comparisons; only real edits may use the default."""
+        atype = self.type_combo.currentData()
+        if atype not in ACTION_TYPES and self._orig_action.type == atype:
+            # Unknown-to-this-build type: no param widgets were built, so
+            # collecting would return {} and destroy the stored params.
+            return Action(self._orig_action.type, dict(self._orig_action.params))
+        return Action(atype, self._collect(peek))
 
     def _on_type(self):
         if self._building:
@@ -387,15 +419,30 @@ class ActionParamsWidget(QWidget):
                     j = w.findData(cur)
                     if j >= 0:
                         w.setCurrentIndex(j)
+                    elif cur:
+                        # The stored target no longer exists (profile deleted).
+                        # Keep it visible instead of snapping to the first
+                        # profile — that snap silently rebound the key on the
+                        # next unrelated edit.
+                        w.addItem(f"(missing profile {cur})", cur)
+                        w.setCurrentIndex(w.count() - 1)
                 w.currentIndexChanged.connect(self._emit)
                 w.setProperty("kind", "profiles")
             elif kind.startswith("choice:"):
                 w = _protect_wheel(QComboBox(), self._nowheel)
                 for opt in kind.split(":", 1)[1].split(","):
                     w.addItem(opt)
-                j = w.findText(str(values.get(key, "")))
+                cur = str(values.get(key, ""))
+                j = w.findText(cur)
                 if j >= 0:
                     w.setCurrentIndex(j)
+                elif cur:
+                    # A stored value this build's list doesn't know (config
+                    # from a newer version): show it verbatim so it round-
+                    # trips instead of being replaced by the first option on
+                    # the next unrelated edit.
+                    w.addItem(cur)
+                    w.setCurrentIndex(w.count() - 1)
                 w.currentIndexChanged.connect(self._emit)
             else:
                 w = QLineEdit(str(values.get(key, ""))); w.textChanged.connect(self._emit)
@@ -404,9 +451,9 @@ class ActionParamsWidget(QWidget):
         holder = QWidget(); holder.setLayout(form)
         self._params_box.addWidget(holder)
 
-    def _collect(self):
+    def _collect(self, peek: bool = False):
         if self._multi_editor is not None:
-            return {"steps": self._multi_editor.get_steps()}
+            return {"steps": self._multi_editor.get_steps(peek)}
         out = {}
         for k, w in self._params.items():
             if isinstance(w, QPlainTextEdit):
@@ -419,17 +466,31 @@ class ActionParamsWidget(QWidget):
                     out[k] = w.currentText()
             elif isinstance(w, QLineEdit):
                 if w.property("kind") == "password":
-                    self._collect_password(w, out)
+                    self._collect_password(w, out, peek)
                 else:
                     out[k] = w.text()
         return out
 
-    def _collect_password(self, w, out):
+    def _collect_password(self, w, out, peek=False):
         """Store the password in the OS keyring and put only its id in the
-        config; fall back to plaintext if no keyring backend is available."""
+        config; fall back to plaintext if no keyring backend is available.
+
+        With `peek` this is a pure read: it reproduces what a real collect
+        WOULD store without touching the keyring or popping the cleartext
+        warning. Merely selecting a password key takes this path (the editor
+        baselines the action on selection) and selection must never have
+        side effects."""
         from .. import secret_store
         text = w.text()
         sid = w.property("secret_id") or ""
+        if peek:
+            if text and sid:
+                out["secret_id"] = sid
+            elif text:
+                out["password"] = text
+            elif sid and w.property("secret_unreadable"):
+                out["secret_id"] = sid
+            return
         if not text:
             # An empty field means "no password" only if we were able to show
             # the current one. If the keyring was locked when this editor was
@@ -524,8 +585,9 @@ class _StepRow(QFrame):
         else:
             self.apw.set_action(Action("launch_app", {}))
 
-    def value(self) -> dict:
-        return {"action": self.apw.get_action().to_dict(), "delay": self.delay.value()}
+    def value(self, peek: bool = False) -> dict:
+        return {"action": self.apw.get_action(peek).to_dict(),
+                "delay": self.delay.value()}
 
 
 class MultiStepsEditor(QWidget):
@@ -578,8 +640,8 @@ class MultiStepsEditor(QWidget):
         for st in (steps or []):
             self._add_row(st)
 
-    def get_steps(self) -> list:
-        return [r.value() for r in self._rows]
+    def get_steps(self, peek: bool = False) -> list:
+        return [r.value(peek) for r in self._rows]
 
 
 class ActionEditor(QWidget):
@@ -591,9 +653,11 @@ class ActionEditor(QWidget):
         self._kc: KeyConfig | None = None
         self._index: int | None = None
         self._building = False
-        # Signature of the action as of the last edit, so we can tell an
-        # action change (icon should follow) from an icon/label/colour edit
-        # (icon must NOT be touched). See _on_edit.
+        # The action as of the last edit (and its signature), so we can tell
+        # an action change (auto icon may follow) from an icon/label/colour
+        # edit (icon must NOT be touched) — and know the PREVIOUS action's
+        # default icon, which is what identifies an untouched auto icon.
+        self._last_action: Action = Action()
         self._last_action_sig: tuple | None = None
 
         root = QVBoxLayout(self)
@@ -657,8 +721,11 @@ class ActionEditor(QWidget):
         # the editor materializes every field of the action type, so a stored
         # action with optional fields omitted (e.g. volume without "step")
         # would otherwise look "changed" on the very first edit and clobber the
-        # icon the user had just picked.
-        self._last_action_sig = self._action_sig(self.params.get_action())
+        # icon the user had just picked. peek=True: baselining on SELECTION
+        # must have no side effects (get_action on a password key would
+        # otherwise write the keyring / pop the cleartext warning).
+        self._last_action = self.params.get_action(peek=True)
+        self._last_action_sig = self._action_sig(self._last_action)
         self._building = False
 
     @staticmethod
@@ -707,21 +774,24 @@ class ActionEditor(QWidget):
             return
         from ..actions import default_icon_for
         new_action = self.params.get_action()
-        sig = self._action_sig(new_action)
-        action_changed = sig != self._last_action_sig
-        self._last_action_sig = sig
-        # Make the icon follow the action's sub-command (up/down/mute, etc.),
-        # but only when the ACTION actually changed. This used to run on every
-        # edit, so the icon the user had just chosen in the Library dialog was
-        # instantly overwritten with the action's default — picking any library
-        # icon appeared to do nothing. A custom File… icon is never touched.
+        prev_action = self._last_action
+        self._last_action = new_action
+        self._last_action_sig = self._action_sig(new_action)
+        # Make the icon follow the action's sub-command (up/down/mute, etc.) —
+        # but ONLY when the current icon is still the PREVIOUS action's
+        # default, i.e. it was auto-assigned and never touched by the user.
+        # Provenance matters, not "is it a library icon": a library icon the
+        # user deliberately picked in the Library dialog must survive every
+        # later edit (three separate user-reported regressions came from
+        # weaker rules here). An icon the user explicitly cleared ("" while
+        # the old default is non-empty) stays cleared, too.
         cur_icon = self.icon_edit.text()
-        if action_changed and (not cur_icon or assets.is_library_icon(cur_icon)):
-            want = assets.library_ref(default_icon_for(new_action)[0])
-            if want and want != cur_icon:
-                self._building = True
-                self.icon_edit.setText(want)
-                self._building = False
+        old_default = assets.library_ref(default_icon_for(prev_action)[0])
+        new_default = assets.library_ref(default_icon_for(new_action)[0])
+        if new_default != old_default and cur_icon == old_default:
+            self._building = True
+            self.icon_edit.setText(new_default)
+            self._building = False
         self._kc.label = self.label_edit.text()
         self._kc.icon = self.icon_edit.text()
         self._kc.bg_color = self.bg_btn.color()

@@ -63,7 +63,7 @@ class DeckController:
         self.on_disconnect: Optional[Callable[[], None]] = None
         self.on_key_event: Optional[Callable[[int, bool], None]] = None
         self.on_page_changed: Optional[Callable[[], None]] = None
-        self.on_monitor_image: Optional[Callable[[int, object], None]] = None
+        self.on_monitor_image: Optional[Callable[[int, object, str], None]] = None
 
         register()
 
@@ -239,9 +239,18 @@ class DeckController:
                       and kc.icon.lower().endswith(".gif") and os.path.exists(kc.icon))
             try:
                 if is_gif:
-                    dev.set_key_gif(index, kc.icon)
-                    self._gif_keys.add(index)
-                else:
+                    # The backend returns -1 for a file that exists but can't
+                    # be decoded (truncated download, mislabeled format). It
+                    # writes nothing to the device in that case — treating it
+                    # as animated anyway froze the key forever: marked in
+                    # _gif_keys, the static path skipped, never painted again.
+                    rc = dev.set_key_gif(index, kc.icon)
+                    if isinstance(rc, int) and rc < 0:
+                        log.warning("gif %r undecodable; rendering static", kc.icon)
+                        is_gif = False
+                    else:
+                        self._gif_keys.add(index)
+                if not is_gif:
                     if index in self._gif_keys:
                         dev.clear_key_gif(index)
                         self._gif_keys.discard(index)
@@ -404,7 +413,10 @@ class DeckController:
                             self._monitor_state.pop(index, None)
                 if emit and self.on_monitor_image:
                     try:
-                        self.on_monitor_image(index, img)
+                        # page id travels with the frame so the GUI can drop
+                        # frames queued before a page switch but delivered
+                        # after it (they'd repaint the wrong page's preview)
+                        self.on_monitor_image(index, img, page.id)
                     except Exception as e:
                         log.error("monitor image callback failed: %s", e)
             except Exception as e:
@@ -534,16 +546,23 @@ class DeckController:
                     log.error("sleep failed: %s", e)
 
     def goto_page(self, index: int) -> None:
-        self.page_index = index
+        # Clamp: a "Go to page #" key configured with 0 (or beyond the last
+        # page) must not store a bogus index — with no device attached nothing
+        # else re-clamps it and the page combo ends up with no selection.
+        n = len(self.container().pages)
+        self.page_index = max(0, min(index, n - 1))
         self.render_page()
 
     def next_page(self) -> None:
-        n = len(self.profile().pages)
+        # container(), not profile(): inside a folder the visible pages are
+        # the FOLDER's — counting the profile's pages made folder pages
+        # unreachable (or wrapped wrongly) from the deck's page keys.
+        n = len(self.container().pages)
         self.page_index = (self.page_index + 1) % n
         self.render_page()
 
     def prev_page(self) -> None:
-        n = len(self.profile().pages)
+        n = len(self.container().pages)
         self.page_index = (self.page_index - 1) % n
         self.render_page()
 

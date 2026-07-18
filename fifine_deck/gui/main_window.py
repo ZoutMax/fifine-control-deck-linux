@@ -30,7 +30,7 @@ class _Bridge(QObject):
     disconnected = pyqtSignal()
     keyEvent = pyqtSignal(int, bool)
     pageChanged = pyqtSignal()
-    monitorImage = pyqtSignal(int, object)   # (key index, PIL image)
+    monitorImage = pyqtSignal(int, object, str)   # (key index, PIL image, page id)
 
 
 class MainWindow(QMainWindow):
@@ -50,6 +50,9 @@ class MainWindow(QMainWindow):
         # Let grid previews render monitor keys from the controller's live
         # sampler (last reading + history) instead of a static placeholder.
         _widgets.MONITOR_PREVIEW_PROVIDER = self._monitor_preview
+        # Stamp key-drags with the page they started on, so a drop landing
+        # after a mid-drag page switch can be rejected.
+        _widgets.CURRENT_PAGE_ID_PROVIDER = lambda: self._page().id
 
         self.bridge = _Bridge()
         self.bridge.connected.connect(self._on_connected)
@@ -61,7 +64,8 @@ class MainWindow(QMainWindow):
         controller.on_disconnect = lambda: self.bridge.disconnected.emit()
         controller.on_key_event = lambda i, p: self.bridge.keyEvent.emit(i, p)
         controller.on_page_changed = lambda: self.bridge.pageChanged.emit()
-        controller.on_monitor_image = lambda i, img: self.bridge.monitorImage.emit(i, img)
+        controller.on_monitor_image = \
+            lambda i, img, page_id="": self.bridge.monitorImage.emit(i, img, page_id)
 
         self._close_notified = False
         self._build_ui()
@@ -69,6 +73,7 @@ class MainWindow(QMainWindow):
         self._build_tray()
         self._reload_profiles()
         self._rebuild_grid()
+        self._last_page_key = self._current_page_key()
 
     def _build_menu(self):
         m = self.menuBar().addMenu("&Options")
@@ -158,6 +163,7 @@ class MainWindow(QMainWindow):
         # reference.
         self.config.brightness = imported.brightness
         self.config.glow = imported.glow
+        self.config.snap_hint_dismissed = imported.snap_hint_dismissed
         self.config.profiles = imported.profiles
         self.config.active_profile_id = imported.active_profile_id
         # reset_nav, not page_index=0: if we were inside a folder, _container
@@ -288,7 +294,7 @@ class MainWindow(QMainWindow):
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(600)
-        self._save_timer.timeout.connect(lambda: self.config.save())
+        self._save_timer.timeout.connect(self._autosave)
 
     def _tray_host_present(self) -> bool:
         """Reliable tray check: is a StatusNotifier host actually on the bus?
@@ -410,6 +416,7 @@ class MainWindow(QMainWindow):
             self.config.active_profile_id = pid
             self.controller.reset_nav()      # exit any folder to the profile root
             self._reload_pages()
+            self._reload_knobs()
             self._refresh_all_previews()
             self._update_breadcrumb()
             self.controller.render_page()
@@ -419,6 +426,7 @@ class MainWindow(QMainWindow):
         if i < 0:
             return
         self.controller.page_index = i
+        self._reload_knobs()
         self._refresh_all_previews()
         self.controller.render_page()
         self.editor.clear()
@@ -550,11 +558,23 @@ class MainWindow(QMainWindow):
 
     def _on_action_dropped(self, index: int, atype: str):
         kc = self._page().key(index)
+        # Capture the OLD action's defaults first: an icon/label that still
+        # matches them was auto-assigned by a previous drop and should follow
+        # the new action; anything else was the user's choice and stays.
+        # (The old guard was `not kc.icon`, so a second drop onto a key kept
+        # the first action's identity forever.)
+        old_icon_name, old_label = default_icon_for(kc.action)
+        old_auto_icon = assets.library_ref(old_icon_name)
         kc.action = Action(atype, {})
+        if atype == "switch_profile" and self.config.profiles:
+            # Materialize the target the editor will display: leaving it
+            # empty made the dropped key a silent no-op until some unrelated
+            # edit happened to write the combo's selection back.
+            kc.action.params["profile_id"] = self.config.profiles[0].id
         icon_name, label = default_icon_for(kc.action)
-        if icon_name and not kc.icon:
+        if kc.icon in ("", old_auto_icon):
             kc.icon = assets.library_ref(icon_name)
-        if label and not kc.label:
+        if kc.label in ("", old_label):
             kc.label = label
         self._ensure_folder(kc)
         self.buttons[index].update_preview(kc)
@@ -591,7 +611,13 @@ class MainWindow(QMainWindow):
         """Double-clicked a key: if it's a folder, navigate into it."""
         kc = self._page().keys.get(index)
         if kc and kc.action.type == "open_folder":
+            created = kc.folder is None
             self._ensure_folder(kc)
+            if created:
+                # _ensure_folder just materialized real model content (a page
+                # with a Back key) — persist it like every other model change,
+                # or it exists only until the app closes.
+                self._queue_save()
             self.controller.enter_folder(kc.folder)
             # (controller fires on_page_changed -> _on_external_page_change resync)
 
@@ -619,22 +645,32 @@ class MainWindow(QMainWindow):
         n = DEVICE_PROFILE.get("dial_count", 0)
         if n <= 0:
             return
-        host = QWidget()
-        hb = QHBoxLayout(host)
-        page = self._page()
-        for k in range(1, n + 1):
-            ed = KnobEditor(k, page.knob(k))
-            ed.changed.connect(self._queue_save)
-            hb.addWidget(ed)
-        hb.addStretch()
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setWidget(host)
+        self._knob_scroll = scroll
+        self._reload_knobs()
         dock = QDockWidget("Knobs", self)
         dock.setWidget(scroll)
         dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
                          QDockWidget.DockWidgetFeature.DockWidgetFloatable)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+
+    def _reload_knobs(self):
+        """(Re)bind the knob editors to the CURRENT page's KnobConfigs. They
+        were built once against the startup page, so after any page or
+        profile switch they kept showing — and writing into — the old page's
+        knobs."""
+        if getattr(self, "_knob_scroll", None) is None:
+            return
+        host = QWidget()
+        hb = QHBoxLayout(host)
+        page = self._page()
+        for k in range(1, DEVICE_PROFILE.get("dial_count", 0) + 1):
+            ed = KnobEditor(k, page.knob(k))
+            ed.changed.connect(self._queue_save)
+            hb.addWidget(ed)
+        hb.addStretch()
+        self._knob_scroll.setWidget(host)   # replaces + deletes the old host
 
     def _on_editor_changed(self):
         if self.selected_index is None:
@@ -676,24 +712,39 @@ class MainWindow(QMainWindow):
                                        sampler.history(spec),
                                        kc.bg_color, kc.text_color)
 
-    def _on_monitor_image(self, index: int, img):
+    def _on_monitor_image(self, index: int, img, page_id: str = ""):
         """Live monitor frame from the controller thread (via the bridge)."""
         btn = self.buttons.get(index)
         kc = self._page().keys.get(index)
-        # The frame may be stale (page switched, key cleared) — check intent.
+        # The frame may be stale — queued before a page switch or an edit and
+        # delivered after. Check both the key's intent and the page it was
+        # rendered for.
         if btn is None or kc is None or kc.action.type != "monitor":
+            return
+        if page_id and page_id != self._page().id:
             return
         btn.setIcon(QIcon(QPixmap.fromImage(rendering.pil_to_qimage(img))))
 
+    def _current_page_key(self) -> tuple:
+        """Identity of the page the GUI is showing (container + page)."""
+        return (id(self.controller.container()), self.controller.page_index)
+
     def _on_external_page_change(self):
-        # A key/knob action switched the page or profile on the controller.
-        # Resync the profile/page combos and previews so GUI edits/deletes act
-        # on the page actually shown on the device (not a stale selection).
+        # The controller re-rendered. Only treat it as a page/profile CHANGE
+        # when the visible page actually changed: a device reconnect or a
+        # same-page re-render must not wipe the user's selection mid-edit
+        # (or mid-dialog — the Library/File picker's result was silently
+        # discarded when a hotplug landed while it was open).
+        changed = self._current_page_key() != getattr(self, "_last_page_key", None)
+        self._last_page_key = self._current_page_key()
         self._reload_profiles()          # also reloads pages from page_index
+        if changed:
+            self._reload_knobs()
         self._refresh_all_previews()
         self._update_breadcrumb()
-        self.editor.clear()
-        self.selected_index = None
+        if changed:
+            self.editor.clear()
+            self.selected_index = None
 
     def _set_status(self):
         from ..actions import environment_summary
@@ -782,8 +833,25 @@ class MainWindow(QMainWindow):
                 "(or run 'fifine-control-deck').\n"
                 "• Quit completely: Options → Quit  (Ctrl+Q).")
 
+    def _autosave(self):
+        """Persist the config; a failure (disk full, permissions) must be
+        VISIBLE — silently dropping the user's edits is the worst outcome —
+        and must not crash the timer."""
+        try:
+            self.config.save()
+        except Exception as e:
+            log.error("autosave failed: %s", e)
+            self.statusBar().showMessage(
+                f"⚠ Could not save configuration: {e}", 10000)
+
     def _quit(self):
-        self.config.save()
+        try:
+            self.config.save()
+        except Exception as e:
+            # Still quit cleanly: a failing save must not leave the app
+            # running with the controller half-stopped (Ctrl+Q previously
+            # aborted here, stopping nothing).
+            log.error("save on quit failed: %s", e)
         self.controller.stop()
         from PyQt6.QtWidgets import QApplication
         QApplication.quit()

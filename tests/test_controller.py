@@ -183,3 +183,41 @@ def test_render_page_no_device_still_fires_callback():
         assert fired == [True]
     finally:
         c.stop()
+
+
+def test_page_keys_navigate_the_folder_when_inside_one():
+    """next/prev/goto page must count the CONTAINER's pages: inside a folder
+    they used the profile's page count, making folder pages unreachable or
+    wrapping wrongly from the deck's page keys (audit finding)."""
+    from fifine_deck.model import Folder, Page
+    c, dev = _connected()
+    try:
+        prof = c.config.active_profile()          # 1 page at profile root
+        folder = Folder(name="F", pages=[Page(name="F1"), Page(name="F2"),
+                                         Page(name="F3")])
+        c.enter_folder(folder)
+        assert c.page().name == "F1"
+        c.next_page()
+        assert c.page().name == "F2", "next_page used the profile's page count"
+        c.next_page(); c.next_page()
+        assert c.page().name == "F1"              # wraps at the FOLDER's count
+        c.prev_page()
+        assert c.page().name == "F3"
+        assert len(prof.pages) == 1               # profile untouched
+    finally:
+        c.stop()
+
+
+def test_goto_page_clamps_bogus_indices():
+    """'Go to page #' configured with 0 produced page_index -1; with no device
+    nothing re-clamped it and the GUI page combo lost its selection."""
+    from fifine_deck.model import Page
+    c, dev = _connected()
+    try:
+        c.config.active_profile().pages.append(Page(name="P2"))
+        c.goto_page(-1)                           # user typed "0"
+        assert c.page_index == 0
+        c.goto_page(99)
+        assert c.page_index == 1                  # clamped to the last page
+    finally:
+        c.stop()

@@ -444,7 +444,7 @@ def test_page_switched_mid_tick_frames_are_dropped():
     c, dev = _monitored_controller([])
     c.config.active_profile().pages.append(Page(name="P2"))
     got = []
-    c.on_monitor_image = lambda i, img: got.append(i)
+    c.on_monitor_image = lambda i, img, page_id="": got.append(i)
     def switch():
         c.page_index = 1
     c._sampler = _HookedSampler([Reading(10.0, "10%")], switch)
@@ -474,7 +474,7 @@ def test_monitor_callback_receives_frames_and_survives_errors():
     c, dev = _monitored_controller([Reading(10.0, "10%"), Reading(90.0, "90%")])
     try:
         got = []
-        def cb(index, img):
+        def cb(index, img, page_id=""):
             got.append(index)
             raise RuntimeError("GUI went away")
         c.on_monitor_image = cb
@@ -541,7 +541,7 @@ def test_failed_write_is_retried_even_with_a_stable_value():
     c._monitor_state.clear()
     dev.key_images.clear()
     got = []
-    c.on_monitor_image = lambda i, img: got.append(i)
+    c.on_monitor_image = lambda i, img, page_id="": got.append(i)
     dev.fail_next = 1
     try:
         c.monitor_tick(now=100.0)

@@ -151,7 +151,10 @@ def test_dropping_an_action_binds_it_with_a_default_icon(win):
     w._on_action_dropped(3, "volume")
     kc = cfg.active_profile().pages[0].key(3)
     assert kc.action.type == "volume"
-    assert kc.icon or kc.label        # a dropped action is given an identity
+    # BOTH halves of the identity, separately: the old `icon or label`
+    # disjunction was blind to an icon-only regression (audit finding).
+    assert kc.icon == mw.assets.library_ref("volume_up")
+    assert kc.label == "Volume"
 
 
 def test_selecting_a_key_tracks_the_selection(win):
@@ -162,13 +165,33 @@ def test_selecting_a_key_tracks_the_selection(win):
 
 def test_external_page_change_clears_a_stale_selection(win):
     """A key action can switch page on the device. The GUI must drop its
-    selection, or a later edit would land on the wrong page's key."""
+    selection AND detach the editor, or a later edit would land on the
+    wrong page's key (the docstring's hazard, now asserted directly)."""
     w, cfg, c = win
     w._on_key_selected(2)
-    assert w.selected_index == 2
+    old_kc = c.page().key(2)
+    w.editor.label_edit.setText("before switch")
+    assert old_kc.label == "before switch"
+    cfg.active_profile().pages.append(mw.Page(name="P2"))
+    c.page_index = 1                      # the page REALLY changes
     c.on_page_changed()
     QApplication.processEvents()
     assert w.selected_index is None
+    # the load-bearing half: an edit after the switch must go nowhere
+    w.editor.label_edit.setText("after switch")
+    assert old_kc.label == "before switch"
+
+
+def test_same_page_rerender_keeps_the_selection(win):
+    """A device reconnect re-renders the SAME page; wiping the selection and
+    editor mid-edit (or mid-dialog) discarded the user's in-flight work
+    (audit finding). Only a real page change may clear."""
+    w, cfg, c = win
+    w._on_key_selected(2)
+    c.on_page_changed()                   # same page object, same index
+    QApplication.processEvents()
+    assert w.selected_index == 2
+    assert w.editor._kc is c.page().key(2)
 
 
 # -- profile / config switches must reset folder navigation ------------------
@@ -307,11 +330,18 @@ def test_the_explicit_clear_button_does_delete_the_folder(win):
     w._ensure_folder(kc)
     assert kc.folder is not None
 
+    kc.label = "L"; kc.icon = "lib:star"
+    kc.bg_color = "#111111"; kc.text_color = "#eeeeee"
     w.editor.set_key(kc, 1)
-    w.editor._clear_key()
+    w.editor.clear_btn.click()            # the REAL button, not the method
 
+    default = mw.KeyConfig()
     assert kc.folder is None
     assert kc.action.type == "none"
+    assert kc.label == default.label
+    assert kc.icon == default.icon
+    assert kc.bg_color == default.bg_color
+    assert kc.text_color == default.text_color
 
 
 def test_hover_scrolling_the_step_delay_spinbox_cannot_change_it(qapp):
@@ -497,12 +527,16 @@ def _editor_with_key(action_type, params, icon_name):
     return ed, kc
 
 
-def test_library_icon_choice_is_not_overwritten(qapp):
+@pytest.mark.parametrize("atype,params", [
+    ("launch_app", {"command": "obs"}),
+    ("volume", {"cmd": "up"}),      # optional-field type: the one that hid bug 2
+])
+def test_library_icon_choice_is_not_overwritten(qapp, atype, params):
     """Picking an icon in the Library dialog set icon_edit, which re-ran the
     'icon follows the action' logic and instantly restored the action's
     default icon — so choosing any library icon appeared to do nothing."""
     from fifine_deck import assets
-    ed, kc = _editor_with_key("launch_app", {"command": "obs"}, "home")
+    ed, kc = _editor_with_key(atype, params, "home")
     ed.icon_edit.setText(assets.library_ref("star"))     # what _pick_library does
     assert ed.icon_edit.text() == assets.library_ref("star")
     assert kc.icon == assets.library_ref("star")
@@ -533,9 +567,13 @@ def test_custom_file_icon_is_never_auto_replaced(qapp, tmp_path):
     assert kc.icon == custom
 
 
-def test_editing_label_does_not_touch_a_chosen_icon(qapp):
+@pytest.mark.parametrize("atype,params", [
+    ("launch_app", {"command": "obs"}),
+    ("volume", {"cmd": "up"}),
+])
+def test_editing_label_does_not_touch_a_chosen_icon(qapp, atype, params):
     from fifine_deck import assets
-    ed, kc = _editor_with_key("launch_app", {"command": "obs"}, "star")
+    ed, kc = _editor_with_key(atype, params, "star")
     ed.label_edit.setText("Streaming")
     assert kc.icon == assets.library_ref("star")
     assert kc.label == "Streaming"
@@ -570,7 +608,11 @@ def test_first_library_pick_sticks_for_every_action_type(qapp, atype, params):
     ed.set_key(kc, 1)
     ed.icon_edit.setText(assets.library_ref("star"))     # first pick
     assert kc.icon == assets.library_ref("star"), f"{atype}: first pick reverted"
-    assert kc.action.type == atype                       # action untouched
+    # action untouched — type AND every original param (the old type-only
+    # assertion was blind to param rewrites; audit finding)
+    assert kc.action.type == atype
+    for k, v in params.items():
+        assert kc.action.params.get(k) == v
 
 
 def test_consecutive_library_picks_all_stick(qapp):
@@ -585,3 +627,309 @@ def test_consecutive_library_picks_all_stick(qapp):
     for name in ("star", "folder", "web", "lock"):
         ed.icon_edit.setText(assets.library_ref(name))
         assert kc.icon == assets.library_ref(name), f"pick {name} reverted"
+
+
+# ===========================================================================
+# Editor-audit regressions (pre-0.6.2 round: 33 confirmed findings)
+# ===========================================================================
+from fifine_deck import assets as _assets                   # noqa: E402
+from fifine_deck.model import Action, KeyConfig, Page       # noqa: E402
+
+
+def _pick_from_real_library_dialog(monkeypatch, editor, avoid=""):
+    """Drive editor._pick_library() through a REAL IconLibraryDialog, clicking
+    a real tile button (audit: the old tests only simulated the picker with
+    icon_edit.setText, so the dialog path itself was never executed)."""
+    from PyQt6.QtWidgets import QToolButton
+    from fifine_deck.gui import widgets as wid
+    picked = {}
+
+    class Driver(wid.IconLibraryDialog):
+        def exec(self):
+            for b in self.findChildren(QToolButton):
+                b.click()                      # real tile: sets chosen + accept
+                if self.chosen != avoid:
+                    break
+            picked["icon"] = self.chosen
+            return 1
+
+    monkeypatch.setattr(wid, "IconLibraryDialog", Driver)
+    editor._pick_library()
+    return picked["icon"]
+
+
+def test_real_dialog_pick_survives_typing_the_command(win, monkeypatch):
+    """THE user-reported bug, third form (critical audit finding): pick an
+    icon in the Library dialog, then type the command — the natural order.
+    Asserted end-to-end: real dialog, model, and the bytes on the device."""
+    from fifine_deck import rendering as R
+    w, cfg, c = win
+    dev = MockDevice()
+    assert c._setup_device(dev)
+    w._on_action_dropped(1, "launch_app")
+    w._on_key_selected(1)
+    kc = c.page().key(1)
+    icon = _pick_from_real_library_dialog(monkeypatch, w.editor, avoid=kc.icon)
+    assert kc.icon == icon
+    w.editor.params._params["command"].setText("gimp")
+    assert kc.icon == icon, "typing the command reverted the picked icon"
+    assert kc.action.params["command"] == "gimp"
+    expected = R.render_key(dev.KEY_PIXEL_WIDTH, kc.label, icon,
+                            kc.bg_color, kc.text_color)
+    assert dev.key_images[1].tobytes() == expected.tobytes(), \
+        "device shows a different icon than the one picked"
+
+
+@pytest.mark.parametrize("atype,param,val", [
+    ("launch_app", "command", "firefox"),
+    ("run_command", "command", "ls -la"),
+    ("open_url", "url", "https://x.dev"),
+    ("hotkey", "keys", "ctrl+alt+t"),
+    ("close_app", "target", "obs"),
+    ("volume", "step", "7"),
+    ("brightness", "value", "15"),
+    ("goto_page", "page", "2"),
+    ("monitor", "interval", "5"),
+])
+def test_picked_icon_survives_param_edits_for_every_type(qapp, atype, param, val):
+    from fifine_deck.gui.widgets import ActionEditor
+    kc = KeyConfig()
+    kc.action = Action(atype, {})
+    kc.icon = _assets.library_ref("heart") or _assets.library_ref("star")
+    picked = kc.icon
+    ed = ActionEditor()
+    ed.set_key(kc, 1)
+    widget = ed.params._params[param]
+    if hasattr(widget, "setPlainText"):
+        widget.setPlainText(val)
+    elif hasattr(widget, "setText"):
+        widget.setText(val)
+    else:
+        widget.setCurrentText(val)
+    assert kc.icon == picked, f"{atype}: editing '{param}' reverted the icon"
+
+
+def test_second_drop_reskins_an_auto_identity(win):
+    """An untouched auto icon/label must follow a second dropped action; the
+    old `not kc.icon` guard kept the first action's identity forever."""
+    w, cfg, c = win
+    w._on_action_dropped(2, "volume")
+    kc = c.page().key(2)
+    assert (kc.icon, kc.label) == (_assets.library_ref("volume_up"), "Volume")
+    w._on_action_dropped(2, "media")
+    assert kc.action.type == "media"
+    assert kc.icon == _assets.library_ref("play")
+    assert kc.label == "Media"
+
+
+def test_user_identity_survives_a_second_drop(win):
+    w, cfg, c = win
+    w._on_action_dropped(2, "volume")
+    kc = c.page().key(2)
+    kc.icon = "/home/me/custom.png"
+    kc.label = "My Key"
+    w._on_action_dropped(2, "media")
+    assert kc.action.type == "media"
+    assert kc.icon == "/home/me/custom.png"
+    assert kc.label == "My Key"
+
+
+def test_cleared_icon_stays_cleared(qapp):
+    """Clearing the icon with the × is a choice; the next action edit used to
+    resurrect the auto icon (audit finding)."""
+    from fifine_deck.gui.widgets import ActionEditor
+    kc = KeyConfig()
+    kc.action = Action("volume", {"cmd": "up"})
+    kc.icon = _assets.library_ref("volume_up")
+    ed = ActionEditor()
+    ed.set_key(kc, 1)
+    ed.icon_edit.setText("")                       # the × button does this
+    assert kc.icon == ""
+    combo = ed.params._params["cmd"]
+    combo.setCurrentIndex(combo.findText("mute"))  # action edit afterwards
+    assert kc.icon == "", "auto icon came back after an explicit clear"
+
+
+def test_auto_icon_clears_when_action_has_no_default(qapp):
+    """Switching an auto-skinned key to an action with no default icon
+    (monitor) must not leave the previous action's icon behind."""
+    from fifine_deck.gui.widgets import ActionEditor
+    kc = KeyConfig()
+    kc.action = Action("volume", {"cmd": "up"})
+    kc.icon = _assets.library_ref("volume_up")      # untouched auto icon
+    ed = ActionEditor()
+    ed.set_key(kc, 1)
+    tc = ed.params.type_combo
+    tc.setCurrentIndex(tc.findData("monitor"))
+    assert kc.action.type == "monitor"
+    assert kc.icon == "", f"stale auto icon left behind: {kc.icon!r}"
+
+
+def test_selecting_a_password_key_has_no_side_effects(qapp, monkeypatch):
+    """set_key baselines the action; for password keys that used to write the
+    keyring and could pop the cleartext modal on mere SELECTION."""
+    from fifine_deck import secret_store
+    from fifine_deck.gui import widgets as wid
+    from fifine_deck.gui.widgets import ActionEditor
+    calls = []
+    monkeypatch.setattr(secret_store, "store",
+                        lambda *a: calls.append(a) or True)
+    monkeypatch.setattr(secret_store, "new_id", lambda: "sid-new")
+    monkeypatch.setattr(wid, "_PLAINTEXT_WARNED", False)
+    kc = KeyConfig()
+    kc.action = Action("password", {"password": "hunter2"})
+    ed = ActionEditor()
+    ed.set_key(kc, 1)                               # selection only
+    assert calls == [], "selection wrote to the keyring"
+    assert wid._PLAINTEXT_WARNED is False
+    # …while a real edit still stores:
+    ed.params._params["password"].setText("hunter3")
+    assert calls, "a real edit no longer reaches the keyring"
+
+
+def test_unknown_choice_value_round_trips(qapp):
+    """A stored combo value this build doesn't know (config from a newer
+    version) used to be silently replaced by the first option."""
+    from fifine_deck.gui.widgets import ActionEditor
+    kc = KeyConfig()
+    kc.action = Action("media", {"cmd": "chapter-next"})   # future value
+    ed = ActionEditor()
+    ed.set_key(kc, 1)
+    ed.label_edit.setText("edited")                        # unrelated edit
+    assert kc.action.params["cmd"] == "chapter-next"
+
+
+def test_unknown_action_type_round_trips(qapp):
+    """An action type from a newer build must survive unrelated edits, not be
+    downgraded to 'none' with its params destroyed."""
+    from fifine_deck.gui.widgets import ActionEditor
+    kc = KeyConfig()
+    kc.action = Action("hologram", {"depth": "3"})         # future type
+    ed = ActionEditor()
+    ed.set_key(kc, 1)
+    ed.label_edit.setText("edited")
+    assert kc.action.type == "hologram"
+    assert kc.action.params == {"depth": "3"}
+
+
+def test_deleted_profile_target_is_preserved(win):
+    """A switch_profile key whose target was deleted used to snap to the
+    first profile on any unrelated edit."""
+    w, cfg, c = win
+    kc = c.page().key(5)
+    kc.action = Action("switch_profile", {"profile_id": "gone-123"})
+    w._on_key_selected(5)
+    w.editor.label_edit.setText("edited")
+    assert kc.action.params["profile_id"] == "gone-123"
+
+
+def test_dropped_switch_profile_key_works_immediately(win):
+    """The drop used to store empty params, making the key a no-op until an
+    unrelated edit materialized the combo's selection."""
+    w, cfg, c = win
+    w._on_action_dropped(6, "switch_profile")
+    kc = c.page().key(6)
+    assert kc.action.params.get("profile_id") == cfg.profiles[0].id
+
+
+def test_import_preserves_snap_hint_dismissed(win, monkeypatch, tmp_path):
+    import json as _json
+    w, cfg, c = win
+    donor = DeckConfig()
+    donor.snap_hint_dismissed = True
+    path = tmp_path / "donor.json"
+    path.write_text(_json.dumps(donor.to_dict()))
+    monkeypatch.setattr(mw.QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *a, **k: (str(path), "")))
+    _AutoBox.answer = QMessageBox.StandardButton.Yes
+    w._import_config()
+    assert cfg.snap_hint_dismissed is True
+
+
+def test_double_click_created_folder_is_queued_for_save(win):
+    w, cfg, c = win
+    kc = c.page().key(7)
+    kc.action = Action("open_folder", {})
+    assert kc.folder is None
+    w._on_open_folder(7)
+    assert kc.folder is not None
+    assert w._save_timer.isActive(), "folder content created but never saved"
+
+
+def test_undecodable_gif_falls_back_to_a_static_render(tmp_path):
+    """A file named .gif that can't be decoded used to freeze the key forever:
+    marked animated, never painted (audit finding)."""
+    bad = tmp_path / "broken.gif"
+    bad.write_bytes(b"this is not a gif at all")
+
+    class GifRejectingDevice(MockDevice):
+        def set_key_gif(self, index, path):
+            return -1                       # what the backend really returns
+
+    cfg = DeckConfig()
+    kc = cfg.active_profile().pages[0].key(1)
+    kc.icon = str(bad)
+    kc.label = "X"
+    c = DeckController(cfg)
+    dev = GifRejectingDevice()
+    try:
+        assert c._setup_device(dev)
+        assert 1 in dev.key_images, "key never painted after gif failure"
+        assert 1 not in c._gif_keys, "failed gif still registered as animated"
+    finally:
+        c.stop()
+
+
+def test_stale_monitor_frame_for_another_page_is_dropped(win):
+    from PIL import Image
+    w, cfg, c = win
+    kc = c.page().key(3)
+    kc.action = Action("monitor", {"metric": "cpu"})
+    applied = []
+    w.buttons[3].setIcon = lambda *a: applied.append(a)     # record repaints
+    img = Image.new("RGB", (64, 64))
+    w._on_monitor_image(3, img, "some-other-page-id")
+    assert applied == [], "frame for another page repainted the preview"
+    w._on_monitor_image(3, img, c.page().id)
+    assert applied, "frame for the current page was wrongly dropped"
+
+
+def test_drop_from_a_stale_page_is_rejected(win):
+    """The drag payload carries the page it started on; a drop landing after
+    a mid-drag page switch must not rearrange the new page (audit finding)."""
+    from PyQt6.QtCore import QMimeData
+    from fifine_deck.gui.widgets import MIME_KEY
+
+    w, cfg, c = win
+    moved = []
+    w.buttons[2].keyMoved.connect(lambda s, d: moved.append((s, d)))
+
+    class Ev:
+        def __init__(self, mime): self._m = mime
+        def mimeData(self): return self._m
+        def acceptProposedAction(self): pass
+        def ignore(self): pass
+
+    stale = QMimeData()
+    stale.setData(MIME_KEY, b"1:not-the-current-page")
+    w.buttons[2].dropEvent(Ev(stale))
+    assert moved == []
+
+    fresh = QMimeData()
+    fresh.setData(MIME_KEY, f"1:{c.page().id}".encode())
+    w.buttons[2].dropEvent(Ev(fresh))
+    assert moved == [(1, 2)]
+
+
+def test_autosave_failure_is_visible_and_quit_still_stops(win, monkeypatch):
+    w, cfg, c = win
+    def boom(path=None):
+        raise OSError("disk full")
+    monkeypatch.setattr(cfg, "save", boom)
+    w._autosave()                                   # must not raise
+    assert "Could not save" in w.statusBar().currentMessage()
+    stopped = []
+    monkeypatch.setattr(c, "stop", lambda: stopped.append(1))
+    monkeypatch.setattr(QApplication, "quit", staticmethod(lambda: None))
+    w._quit()                                       # must not raise either
+    assert stopped, "quit aborted before stopping the controller"
