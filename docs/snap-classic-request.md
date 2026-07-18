@@ -43,7 +43,7 @@ as soon as classic is granted. Thanks!
 
 ## Status
 
-- [ ] Forum account approved
-- [ ] Request posted (link: _____ )
+- [x] Forum account approved (zoutmax)
+- [x] Request posted 2026-07-18: https://forum.snapcraft.io/t/classic-confinement-request-fifine-control-deck/52368
 - [ ] Reviewer follow-ups answered
 - [ ] Classic granted → upload/release 0.7.0 classic build
