@@ -1,3 +1,9 @@
+fifine-control-deck (0.8.2) noble; urgency=medium
+
+  * Release 0.8.2
+
+ -- ZoutMax <150600436+ZoutMax@users.noreply.github.com>  Mon, 20 Jul 2026 01:07:36 +0200
+
 fifine-control-deck (0.8.1ppa1) resolute; urgency=medium
 
   * PPA build of 0.8.1 for resolute
