@@ -5,7 +5,7 @@ After=graphical-session.target
 [Service]
 # Adjust the path if you cloned elsewhere.
 ExecStart=/usr/bin/python3 -m fifine_deck --headless
-WorkingDirectory=%h/fifine-control-deck-linux
+WorkingDirectory=%h/FifineControlDeck
 Restart=on-failure
 RestartSec=2
 # Give wpctl / playerctl / xdg-open the right session bus + display.

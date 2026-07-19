@@ -40,7 +40,7 @@ with `head -1 debian/changelog`; `./release.sh <version>` maintains it). Sign
 with the key explicitly (`-k`), which avoids the maintainer-email/key mismatch:
 
 ```bash
-cd fifine-control-deck-linux
+cd FifineControlDeck
 KEY=D42A012CF26518F44F1E4F7BB1174D503445F8FE
 VERSION="$(sed -n '1s/.*(\([^)]*\)).*/\1/p' debian/changelog)"
 

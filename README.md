@@ -14,15 +14,15 @@ with profiles, multiple pages, a configuration GUI, and a system tray.
 
 ## Links
 
-- **Website:** <https://zoutmax.github.io/fifine-control-deck-linux/>
+- **Website:** <https://zoutmax.github.io/FifineControlDeck/>
 - **Launchpad PPA** (apt) — **recommended, drives the deck fully:**
   `sudo add-apt-repository ppa:zoutmax/fifine && sudo apt install fifine-control-deck`
   (<https://launchpad.net/~zoutmax/+archive/ubuntu/fifine>)
 - **Direct download** (`.deb`, amd64/arm64):
-  <https://github.com/ZoutMax/fifine-control-deck-linux/releases/latest>
-- **Source (GitHub):** <https://github.com/ZoutMax/fifine-control-deck-linux>
-  ([Releases](https://github.com/ZoutMax/fifine-control-deck-linux/releases) ·
-  [Issues](https://github.com/ZoutMax/fifine-control-deck-linux/issues))
+  <https://github.com/ZoutMax/FifineControlDeck/releases/latest>
+- **Source (GitHub):** <https://github.com/ZoutMax/FifineControlDeck>
+  ([Releases](https://github.com/ZoutMax/FifineControlDeck/releases) ·
+  [Issues](https://github.com/ZoutMax/FifineControlDeck/issues))
 - **Launchpad project:** <https://launchpad.net/fifine-control-deck>
   ([code mirror](https://code.launchpad.net/~zoutmax/fifine-control-deck/+git/fifine-control-deck-linux))
 
@@ -134,7 +134,7 @@ package for your CPU and install it — this one-liner auto-detects the arch:
 
 ```bash
 ARCH=$(dpkg --print-architecture)   # amd64 or arm64
-wget https://github.com/ZoutMax/fifine-control-deck-linux/releases/latest/download/fifine-control-deck_${ARCH}.deb
+wget https://github.com/ZoutMax/FifineControlDeck/releases/latest/download/fifine-control-deck_${ARCH}.deb
 sudo apt install ./fifine-control-deck_${ARCH}.deb
 ```
 
@@ -149,7 +149,7 @@ also resolves dependencies. Plain `sudo dpkg -i …deb` does **not**; follow it
 with `sudo apt-get -f install`.)
 
 Or grab a specific version from the
-[Releases page](https://github.com/ZoutMax/fifine-control-deck-linux/releases).
+[Releases page](https://github.com/ZoutMax/FifineControlDeck/releases).
 
 **Requirements:** Python ≥ 3.10 and PyQt6 (present on Debian 12+, Ubuntu 22.04+,
 Mint 21+ and newer). The bundled USB transport library needs only glibc ≥ 2.17,

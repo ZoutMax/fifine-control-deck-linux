@@ -41,7 +41,7 @@ Install from the PPA instead:
     sudo apt install fifine-control-deck
 
 or download a .deb from:
-    https://github.com/ZoutMax/fifine-control-deck-linux/releases
+    https://github.com/ZoutMax/FifineControlDeck/releases
 EOF
     exit 1
 fi

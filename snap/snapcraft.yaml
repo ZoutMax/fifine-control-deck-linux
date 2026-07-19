@@ -4,10 +4,10 @@ version: '0.8.1'
 icon: snap/gui/fifine-control-deck.png
 title: fifine Control Deck
 license: MIT
-contact: https://github.com/ZoutMax/fifine-control-deck-linux/issues
-issues: https://github.com/ZoutMax/fifine-control-deck-linux/issues
-source-code: https://github.com/ZoutMax/fifine-control-deck-linux
-website: https://zoutmax.github.io/fifine-control-deck-linux/
+contact: https://github.com/ZoutMax/FifineControlDeck/issues
+issues: https://github.com/ZoutMax/FifineControlDeck/issues
+source-code: https://github.com/ZoutMax/FifineControlDeck
+website: https://zoutmax.github.io/FifineControlDeck/
 summary: Control app for fifine / Stream Dock macro keypads
 description: |
   A native Linux control application for the fifine Control Deck (a
@@ -16,7 +16,7 @@ description: |
   hotkeys, media and volume control, scripts, brightness, page/profile
   switching, folders and multi-step macros — with a PyQt6 configuration GUI.
 
-  Website: https://zoutmax.github.io/fifine-control-deck-linux/
+  Website: https://zoutmax.github.io/FifineControlDeck/
 
   This is the CLASSIC build: the deck is driven over /dev/hidraw, which strict
   confinement cannot grant, so full device control needs classic. Access still

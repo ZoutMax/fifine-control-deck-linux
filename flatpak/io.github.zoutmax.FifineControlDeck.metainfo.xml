@@ -22,9 +22,9 @@
 
   <launchable type="desktop-id">io.github.zoutmax.FifineControlDeck.desktop</launchable>
 
-  <url type="homepage">https://zoutmax.github.io/fifine-control-deck-linux/</url>
-  <url type="bugtracker">https://github.com/ZoutMax/fifine-control-deck-linux/issues</url>
-  <url type="vcs-browser">https://github.com/ZoutMax/fifine-control-deck-linux</url>
+  <url type="homepage">https://zoutmax.github.io/FifineControlDeck/</url>
+  <url type="bugtracker">https://github.com/ZoutMax/FifineControlDeck/issues</url>
+  <url type="vcs-browser">https://github.com/ZoutMax/FifineControlDeck</url>
 
   <developer id="io.github.zoutmax">
     <name>Daniel Houtmann</name>
@@ -32,11 +32,11 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/ZoutMax/fifine-control-deck-linux/main/assets/store/screenshot-01-overview.png</image>
+      <image>https://raw.githubusercontent.com/ZoutMax/FifineControlDeck/main/assets/store/screenshot-01-overview.png</image>
       <caption>Actions catalog, the live key grid with system-monitor keys, and the key-settings panel</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/ZoutMax/fifine-control-deck-linux/main/assets/store/screenshot-02-editor.png</image>
+      <image>https://raw.githubusercontent.com/ZoutMax/FifineControlDeck/main/assets/store/screenshot-02-editor.png</image>
       <caption>Editing a key: icon, colours, label and the assigned action</caption>
     </screenshot>
   </screenshots>

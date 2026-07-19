@@ -74,8 +74,8 @@ DOCDIR="$STAGE/usr/share/doc/$PKG"
 mkdir -p "$DOCDIR"
 cat > "$DOCDIR/copyright" <<'EOF'
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: fifine-control-deck-linux
-Source: https://github.com/ZoutMax/fifine-control-deck-linux
+Upstream-Name: FifineControlDeck
+Source: https://github.com/ZoutMax/FifineControlDeck
 
 Files: *
 Copyright: 2026 ZoutMax
@@ -122,7 +122,7 @@ Depends: python3 (>= 3.10), python3-pyqt6, python3-pil, python3-psutil, libc6, l
 Recommends: playerctl, ydotool, wireplumber | pulseaudio-utils, xdg-utils, python3-keyring, python3-pyudev, python3-pynvml
 Installed-Size: $INSTALLED_KB
 Maintainer: ZoutMax <danielhoutmann@hotmail.com>
-Homepage: https://github.com/ZoutMax/fifine-control-deck-linux
+Homepage: https://github.com/ZoutMax/FifineControlDeck
 Description: Control app for fifine / Stream Dock macro keypads
  A native Linux control application for the fifine Control Deck
  (Mirabox "Stream Dock" 293V3-family, USB 3142:0060). Draws icons and

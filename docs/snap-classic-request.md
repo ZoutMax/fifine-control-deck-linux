@@ -23,7 +23,7 @@ What it is: a native Linux control application for the FiFine AmpliGame D6 /
 "Stream Dock" family of USB macro keypads with per-key LCD screens
 (USB 3142:0060). It renders per-key icons on the device and executes
 user-configured actions on key presses. Free and open source (GPL):
-https://github.com/ZoutMax/fifine-control-deck-linux
+https://github.com/ZoutMax/FifineControlDeck
 
 Why classic: the device is driven over /dev/hidraw with a vendor HID
 protocol (via hidapi's hidraw backend). Strict confinement cannot grant

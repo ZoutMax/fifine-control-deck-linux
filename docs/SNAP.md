@@ -24,7 +24,7 @@ sudo snap install snapcraft --classic
 sudo snap install lxd && sudo lxd init --auto
 sudo usermod -aG lxd "$USER"   # then re-login
 
-cd fifine-control-deck-linux
+cd FifineControlDeck
 snapcraft            # builds ./fifine-control-deck_<version>_amd64.snap
 ```
 

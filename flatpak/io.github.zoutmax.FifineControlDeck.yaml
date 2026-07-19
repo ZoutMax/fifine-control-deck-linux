@@ -63,7 +63,7 @@ modules:
           ${FLATPAK_DEST}/share/icons/hicolor/256x256/apps/io.github.zoutmax.FifineControlDeck.png
     sources:
       - type: git
-        url: https://github.com/ZoutMax/fifine-control-deck-linux.git
+        url: https://github.com/ZoutMax/FifineControlDeck.git
         tag: v0.8.1
         commit: b0fb0141ab8a6a110fc196d28e2f62c3de274e3f
       - type: file

@@ -41,7 +41,7 @@ fifine-control-deck snap (publisher: zoutmax, strict confinement).
   keypad. Without raw-usb auto-connected the device is inert until the user
   manually runs `snap connect` — a poor first-run experience. hardware-observe
   is used to enumerate / identify the device.
-- Source: https://github.com/ZoutMax/fifine-control-deck-linux
+- Source: https://github.com/ZoutMax/FifineControlDeck
 
 Thanks!
 ```

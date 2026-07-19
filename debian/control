@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: ZoutMax <150600436+ZoutMax@users.noreply.github.com>
 Build-Depends: debhelper-compat (= 13)
 Standards-Version: 4.6.2
-Homepage: https://github.com/ZoutMax/fifine-control-deck-linux
+Homepage: https://github.com/ZoutMax/FifineControlDeck
 Rules-Requires-Root: no
 
 Package: fifine-control-deck

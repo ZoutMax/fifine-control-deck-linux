@@ -67,13 +67,13 @@
     <div class="wrap">
       <img class="icon" src="img/icon.png" alt="fifine Control Deck icon">
       <h1>fifine Control Deck</h1>
-      <a class="version" id="version" href="https://github.com/ZoutMax/fifine-control-deck-linux/releases/latest" hidden></a>
+      <a class="version" id="version" href="https://github.com/ZoutMax/FifineControlDeck/releases/latest" hidden></a>
       <p class="tagline">Control your Mirabox / Hotspot “Stream Dock” macro keypad — natively on Linux.</p>
       <div class="badges"><span>amd64 + arm64</span><span>apt &amp; .deb</span><span>MIT licensed</span><span>Alpha</span></div>
       <div class="cta">
         <a class="btn ppa" href="https://launchpad.net/~zoutmax/+archive/ubuntu/fifine">Add the PPA (apt)</a>
-        <a class="btn deb" href="https://github.com/ZoutMax/fifine-control-deck-linux/releases/latest">Download .deb</a>
-        <a class="btn src" href="https://github.com/ZoutMax/fifine-control-deck-linux">Source on GitHub</a>
+        <a class="btn deb" href="https://github.com/ZoutMax/FifineControlDeck/releases/latest">Download .deb</a>
+        <a class="btn src" href="https://github.com/ZoutMax/FifineControlDeck">Source on GitHub</a>
       </div>
     </div>
   </header>
@@ -122,11 +122,11 @@ sudo apt install fifine-control-deck</pre>
 
   <footer>
     <div class="flinks">
-      <a href="https://github.com/ZoutMax/fifine-control-deck-linux">GitHub</a>
-      <a href="https://github.com/ZoutMax/fifine-control-deck-linux/releases">Releases</a>
+      <a href="https://github.com/ZoutMax/FifineControlDeck">GitHub</a>
+      <a href="https://github.com/ZoutMax/FifineControlDeck/releases">Releases</a>
       <a href="https://launchpad.net/fifine-control-deck">Launchpad project</a>
       <a href="https://launchpad.net/~zoutmax/+archive/ubuntu/fifine">PPA</a>
-      <a href="https://github.com/ZoutMax/fifine-control-deck-linux/issues">Report an issue</a>
+      <a href="https://github.com/ZoutMax/FifineControlDeck/issues">Report an issue</a>
     </div>
     <p>MIT licensed · A from-scratch Linux reimplementation of the Windows fifine Control Deck.<br>
     Reuses only the vendor’s MIT-licensed StreamDock USB backend.</p>
@@ -138,7 +138,7 @@ sudo apt install fifine-control-deck</pre>
     (function () {
       var el = document.getElementById('version');
       if (!el) return;
-      fetch('https://api.github.com/repos/ZoutMax/fifine-control-deck-linux/releases/latest')
+      fetch('https://api.github.com/repos/ZoutMax/FifineControlDeck/releases/latest')
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
           if (d && d.tag_name) {
@@ -158,7 +158,7 @@ sudo apt install fifine-control-deck</pre>
       var btn = document.querySelector('.btn.deb');
       if (!btn) return;
       function setArch(arch) {
-        btn.href = 'https://github.com/ZoutMax/fifine-control-deck-linux/releases/latest/download/fifine-control-deck_' + arch + '.deb';
+        btn.href = 'https://github.com/ZoutMax/FifineControlDeck/releases/latest/download/fifine-control-deck_' + arch + '.deb';
         btn.textContent = 'Download .deb (' + arch + ')';
       }
       function fromUAString() {

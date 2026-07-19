@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: fifine-control-deck-linux
-Source: https://github.com/ZoutMax/fifine-control-deck-linux
+Upstream-Name: FifineControlDeck
+Source: https://github.com/ZoutMax/FifineControlDeck
 
 Files: *
 Copyright: 2026 ZoutMax

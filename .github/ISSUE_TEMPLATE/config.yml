@@ -1,7 +1,7 @@
 blank_issues_enabled: true
 contact_links:
   - name: Project homepage
-    url: https://zoutmax.github.io/fifine-control-deck-linux/
+    url: https://zoutmax.github.io/FifineControlDeck/
     about: Docs, install instructions, and links to every channel.
   - name: Snap Store
     url: https://snapcraft.io/fifine-control-deck
