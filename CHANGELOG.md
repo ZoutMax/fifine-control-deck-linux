@@ -4,6 +4,50 @@ All notable changes to **fifine Control Deck** are documented here. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and the project
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] - 2026-07-19
+Hardening release: every finding from a 13-point adversarial audit of 0.8.1,
+fixed with a regression test each. None of these affect normal day-to-day use;
+they cover data safety, crash recovery, and multi-instance edge cases.
+
+### Fixed
+- **Deleting the currently-viewed first page no longer loses later edits.**
+  The key/knob editors stayed bound to the deleted page's objects, so
+  everything typed afterwards was silently discarded on restart.
+- **Config saves are now crash-durable.** The config is fsync'd before the
+  atomic rename, so a power cut can no longer leave an empty `config.json`
+  (all profiles lost). The corrupt-config recovery also preserves the corpse
+  as `config.json.corrupt` instead of overwriting `config.json.bak` — the
+  import flow's backup of a known-good config.
+- **A hand-edited config can no longer crash the app on every launch.**
+  Wrong-typed scalars (`"icon": null`, an unquoted color) used to load
+  structurally and then crash the GUI at startup, bypassing the recovery
+  path. They are now coerced to defaults; the rest of the config survives.
+- **Wrong-GPU pinning on hybrid machines, the init-failure half.** If the
+  NVIDIA driver was still loading at login, one failed `nvmlInit()` made the
+  GPU temp/VRAM/load keys silently cache the AMD iGPU sensor forever. The
+  probes now detect NVIDIA hardware via PCI sysfs (driver-independent) and
+  keep retrying — bounded, then settle on the best remaining source.
+- **Exported configs are private (0600).** The export can contain a
+  plaintext password (the no-keyring fallback); it was written world-readable
+  while the live config is carefully kept 0600.
+- **Single instance is now an atomic claim.** The IPC socket moved to
+  `XDG_RUNTIME_DIR` (another local user could squat the predictable /tmp
+  name and silently swallow every launch), and instance ownership is an
+  flock — two racing launches can no longer both come up live and clobber
+  each other's config saves. `--quit` and hand-off still reach a pre-0.8.2
+  instance across an upgrade.
+- **SIGTERM (logout, service stop) now runs the orderly shutdown**: the
+  pending debounced edit is saved and the deck is cleared — previously the
+  process died instantly, losing both.
+- **`--enable/--disable-autostart` while the app is running** is delegated
+  to the running instance, so its menu toggle and the saved state stay in
+  sync (the CLI's change used to be overwritten by the GUI's next autosave).
+- **Hotplug racing a manual reconnect can no longer double-open the deck**
+  (which dispatched every keypress twice and leaked a zombie device handle).
+- **The color picker no longer leaks a dialog per pick**, and an unknown
+  action type from a newer build's config no longer pollutes the action
+  dropdown of every other key edited afterwards.
+
 ## [0.8.1] - 2026-07-19
 ### Fixed
 - **Color picker readable in dark mode.** The dialog could open as the

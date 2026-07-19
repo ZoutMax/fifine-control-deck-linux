@@ -2,6 +2,7 @@
 
 All persistence uses an explicit tmp path — the real user config is never touched.
 """
+import json
 import os
 
 from fifine_deck.model import Action, DeckConfig, Folder, KeyConfig
@@ -74,16 +75,56 @@ def test_load_corrupt_json_backs_up(tmp_path):
     p.write_text("{ this is not valid json")
     cfg = DeckConfig.load(str(p))
     assert cfg.profiles                      # a fresh default was returned
-    assert (tmp_path / "c.json.bak").exists()  # the corrupt file was preserved
+    # preserved as .corrupt — NOT .bak, which belongs to the import flow's
+    # backup of a known-good config and must never be overwritten by a corpse
+    assert (tmp_path / "c.json.corrupt").exists()
+    assert not (tmp_path / "c.json.bak").exists()
 
 
-def test_load_bad_types_backs_up(tmp_path):
-    # valid JSON but a field that from_dict() can't coerce (int("abc")) -> recover
+def test_load_recovery_never_clobbers_good_backup(tmp_path):
     p = tmp_path / "c.json"
-    p.write_text('{"profiles": [{"pages": []}], "brightness": "not-an-int"}')
+    good = DeckConfig()
+    good.profiles[0].name = "precious"
+    good.save(str(p) + ".bak")               # the import flow's backup
+    p.write_text("{ this is not valid json")
+    DeckConfig.load(str(p))
+    restored = DeckConfig.load(str(p) + ".bak")
+    assert restored.profiles[0].name == "precious"
+
+
+def test_load_bad_scalar_types_coerced_not_reset(tmp_path):
+    # Valid JSON with wrong-typed scalars: the config must survive with the
+    # bad fields defaulted — NOT be reset (that would lose every profile) and
+    # NOT load raw (a null icon would crash the GUI at startup forever).
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps({
+        "profiles": [{"name": "keepme", "pages": [{"keys": {
+            "1": {"icon": None, "bg_color": 101020, "label": 7,
+                  "action": {"type": None, "params": "nope"}},
+            "bogus": {"label": "dropped"},
+        }}]}],
+        "brightness": "not-an-int",
+        "active_profile_id": None,
+    }))
     cfg = DeckConfig.load(str(p))
-    assert cfg.profiles
-    assert (tmp_path / "c.json.bak").exists()
+    assert not (tmp_path / "c.json.corrupt").exists()
+    assert cfg.profiles[0].name == "keepme"   # nothing was lost
+    assert cfg.brightness == 80
+    kc = cfg.profiles[0].pages[0].keys[1]
+    assert kc.icon == "" and kc.bg_color == "#101020" and kc.label == ""
+    assert kc.action.type == "none" and kc.action.params == {}
+    assert "bogus" not in {str(k) for k in cfg.profiles[0].pages[0].keys}
+
+
+def test_save_fsyncs_before_replace(tmp_path, monkeypatch):
+    # Durability: the data must hit disk before the rename commits it, or a
+    # power cut can leave a zero-length config (all profiles lost).
+    order = []
+    real_fsync, real_replace = os.fsync, os.replace
+    monkeypatch.setattr(os, "fsync", lambda fd: (order.append("fsync"), real_fsync(fd))[1])
+    monkeypatch.setattr(os, "replace", lambda a, b: (order.append("replace"), real_replace(a, b))[1])
+    DeckConfig().save(str(tmp_path / "c.json"))
+    assert "fsync" in order and order.index("fsync") < order.index("replace")
 
 
 def test_save_is_private(tmp_path):

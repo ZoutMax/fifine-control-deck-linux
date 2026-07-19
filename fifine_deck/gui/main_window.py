@@ -158,7 +158,12 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".json"):
             path += ".json"
         try:
-            with open(path, "w") as f:
+            # 0600 like DeckConfig.save: the config can hold a plaintext
+            # password (the no-keyring fallback), and an export written with
+            # the default umask would hand that secret to every local user.
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            os.fchmod(fd, 0o600)      # O_CREAT's mode is skipped on overwrite
+            with os.fdopen(fd, "w") as f:
                 json.dump(self.config.to_dict(), f, indent=2)
         except OSError as e:
             QMessageBox.warning(self, "Export failed", str(e))
@@ -522,6 +527,15 @@ class MainWindow(QMainWindow):
             return
         del cont.pages[self.controller.page_index]
         self.controller.page_index = 0
+        # The editor/knob panels may be bound to the page we just deleted.
+        # The async page-change resync can't be relied on to clear them:
+        # deleting the page at index 0 keeps (container, page_index) equal,
+        # so it sees "no change" — and edits would then flow into the deleted
+        # Page's objects and silently vanish on restart (0.8.1 audit).
+        self.editor.clear()
+        self.selected_index = None
+        self._last_page_key = None       # force the next resync to treat this as a change
+        self._reload_knobs()
         self._reload_pages()
         self._refresh_all_previews()
         self.controller.render_page()

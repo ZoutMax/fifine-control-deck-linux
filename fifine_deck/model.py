@@ -37,6 +37,19 @@ def _new_id() -> str:
     return uuid.uuid4().hex[:8]
 
 
+def _as_dict(v) -> dict:
+    """Defensive: hand-edited configs can hold any JSON type anywhere."""
+    return v if isinstance(v, dict) else {}
+
+
+def _as_str(v, default: str) -> str:
+    """Coerce a scalar that must be a string. A null/number here would pass
+    load() structurally and then crash the GUI at startup on every launch —
+    a loop the corrupt-config recovery can't catch because json.load and
+    from_dict both succeed."""
+    return v if isinstance(v, str) else default
+
+
 @dataclass
 class Action:
     """A single action bound to a key or knob gesture.
@@ -51,9 +64,11 @@ class Action:
 
     @classmethod
     def from_dict(cls, d: Optional[dict]) -> "Action":
+        d = _as_dict(d)
         if not d:
             return cls()
-        return cls(type=d.get("type", "none"), params=dict(d.get("params", {})))
+        return cls(type=_as_str(d.get("type"), "none"),
+                   params=dict(_as_dict(d.get("params"))))
 
 
 @dataclass
@@ -86,15 +101,16 @@ class KeyConfig:
 
     @classmethod
     def from_dict(cls, d: dict) -> "KeyConfig":
+        d = _as_dict(d)
         fdata = d.get("folder")
         return cls(
-            label=d.get("label", ""),
-            icon=d.get("icon", ""),
-            bg_color=d.get("bg_color", "#101020"),
-            text_color=d.get("text_color", "#ffffff"),
+            label=_as_str(d.get("label"), ""),
+            icon=_as_str(d.get("icon"), ""),
+            bg_color=_as_str(d.get("bg_color"), "#101020"),
+            text_color=_as_str(d.get("text_color"), "#ffffff"),
             action=Action.from_dict(d.get("action")),
             hold_action=Action.from_dict(d.get("hold_action")),
-            folder=Folder.from_dict(fdata) if fdata else None,
+            folder=Folder.from_dict(fdata) if isinstance(fdata, dict) else None,
         )
 
     def is_empty(self) -> bool:
@@ -122,8 +138,9 @@ class KnobConfig:
 
     @classmethod
     def from_dict(cls, d: dict) -> "KnobConfig":
+        d = _as_dict(d)
         return cls(
-            label=d.get("label", ""),
+            label=_as_str(d.get("label"), ""),
             press=Action.from_dict(d.get("press")),
             left=Action.from_dict(d.get("left")),
             right=Action.from_dict(d.get("right")),
@@ -158,11 +175,24 @@ class Page:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Page":
+        d = _as_dict(d)
+        keys: dict[int, KeyConfig] = {}
+        for k, v in _as_dict(d.get("keys")).items():
+            try:
+                keys[int(k)] = KeyConfig.from_dict(v)
+            except (TypeError, ValueError):
+                continue        # malformed index: drop the entry, keep the page
+        knobs: dict[int, KnobConfig] = {}
+        for k, v in _as_dict(d.get("knobs")).items():
+            try:
+                knobs[int(k)] = KnobConfig.from_dict(v)
+            except (TypeError, ValueError):
+                continue
         return cls(
-            name=d.get("name", "Page"),
-            id=d.get("id", _new_id()),
-            keys={int(k): KeyConfig.from_dict(v) for k, v in d.get("keys", {}).items()},
-            knobs={int(k): KnobConfig.from_dict(v) for k, v in d.get("knobs", {}).items()},
+            name=_as_str(d.get("name"), "Page"),
+            id=_as_str(d.get("id"), "") or _new_id(),
+            keys=keys,
+            knobs=knobs,
         )
 
 
@@ -180,8 +210,12 @@ class Folder:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Folder":
-        pages = [Page.from_dict(p) for p in d.get("pages", [])] or [Page(name="Main")]
-        return cls(name=d.get("name", "Folder"), id=d.get("id", _new_id()), pages=pages)
+        d = _as_dict(d)
+        raw = d.get("pages")
+        pages = ([Page.from_dict(p) for p in raw] if isinstance(raw, list) else []) \
+            or [Page(name="Main")]
+        return cls(name=_as_str(d.get("name"), "Folder"),
+                   id=_as_str(d.get("id"), "") or _new_id(), pages=pages)
 
 
 @dataclass
@@ -202,11 +236,14 @@ class Profile:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Profile":
-        pages = [Page.from_dict(p) for p in d.get("pages", [])] or [Page(name="Main")]
+        d = _as_dict(d)
+        raw = d.get("pages")
+        pages = ([Page.from_dict(p) for p in raw] if isinstance(raw, list) else []) \
+            or [Page(name="Main")]
         return cls(
-            name=d.get("name", "Default"),
-            id=d.get("id", _new_id()),
-            wm_class=d.get("wm_class", ""),
+            name=_as_str(d.get("name"), "Default"),
+            id=_as_str(d.get("id"), "") or _new_id(),
+            wm_class=_as_str(d.get("wm_class"), ""),
             pages=pages,
         )
 
@@ -253,15 +290,22 @@ class DeckConfig:
 
     @classmethod
     def from_dict(cls, d: dict) -> "DeckConfig":
-        profiles = [Profile.from_dict(p) for p in d.get("profiles", [])] or [Profile()]
+        d = _as_dict(d)
+        raw = d.get("profiles")
+        profiles = ([Profile.from_dict(p) for p in raw] if isinstance(raw, list)
+                    else []) or [Profile()]
+        try:
+            brightness = max(0, min(100, int(d.get("brightness", 80))))
+        except (TypeError, ValueError):
+            brightness = 80
         cfg = cls(
             version=d.get("version", CONFIG_VERSION),
-            brightness=int(d.get("brightness", 80)),
+            brightness=brightness,
             glow=bool(d.get("glow", True)),
             snap_hint_dismissed=bool(d.get("snap_hint_dismissed", False)),
             autostart_enabled=bool(d.get("autostart_enabled", False)),
             profiles=profiles,
-            active_profile_id=d.get("active_profile_id", ""),
+            active_profile_id=_as_str(d.get("active_profile_id"), ""),
         )
         return cfg
 
@@ -284,6 +328,12 @@ class DeckConfig:
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w") as f:
                 json.dump(self.to_dict(), f, indent=2)
+                # fsync before the rename: without it, a power loss inside the
+                # writeback window can journal the rename before the data
+                # blocks land, leaving a zero-length config.json after reboot
+                # (XFS/btrfs; ext4's auto_da_alloc only mitigates by chance).
+                f.flush()
+                os.fsync(fd)
         except BaseException:
             try:
                 os.unlink(tmp)
@@ -292,6 +342,17 @@ class DeckConfig:
             raise
         # os.replace carries the temp file's 0600 mode onto the real path.
         os.replace(tmp, path)
+        # Persist the rename itself. Best-effort: some filesystems refuse
+        # directory fsync, and losing the rename (not the data) on power cut
+        # just means the previous config shows up — never a truncated one.
+        try:
+            dfd = os.open(os.path.dirname(path) or ".", os.O_RDONLY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except OSError:
+            pass
 
     @staticmethod
     def looks_like_config(data) -> bool:
@@ -320,9 +381,12 @@ class DeckConfig:
         except (json.JSONDecodeError, OSError, AttributeError, ValueError,
                 TypeError, KeyError):
             # Corrupt or structurally-invalid config (bad JSON *or* wrong shape):
-            # back it up and start fresh rather than crash on launch.
+            # preserve it and start fresh rather than crash on launch. NOT
+            # ".bak" — that's the import flow's backup of a known-GOOD config
+            # (main_window._import_config), and overwriting it with this
+            # corpse would destroy the one copy the user could restore from.
             try:
-                os.replace(path, path + ".bak")
+                os.replace(path, path + ".corrupt")
             except OSError:
                 pass
             cfg = cls()

@@ -115,7 +115,7 @@ def test_quit_flag_waits_until_the_instance_is_gone(tmp_path, monkeypatch, capsy
         calls.append(cmd)
         return True
     monkeypatch.setattr(app, "_signal_existing", fake_signal)
-    monkeypatch.setattr(app, "_ipc_socket_path", lambda: str(sock))
+    monkeypatch.setattr(app, "_liveness_paths", lambda: {str(sock)})
     checks = {"n": 0}
     real_exists = app.os.path.exists
 
@@ -136,7 +136,7 @@ def test_quit_flag_reports_a_stuck_instance(tmp_path, monkeypatch):
     sock = tmp_path / "ipc.sock"
     sock.write_text("")                          # never removed: stuck
     monkeypatch.setattr(app, "_signal_existing", lambda cmd: True)
-    monkeypatch.setattr(app, "_ipc_socket_path", lambda: str(sock))
+    monkeypatch.setattr(app, "_liveness_paths", lambda: {str(sock)})
     import time as _time
     t = {"now": 0.0}
     monkeypatch.setattr(_time, "monotonic", lambda: t.__setitem__("now", t["now"] + 3) or t["now"])

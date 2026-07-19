@@ -406,3 +406,49 @@ def test_stop_cancels_inflight_holds(monkeypatch):
     assert c._holds == {}
     time.sleep(0.2)
     assert c.config.brightness != 77
+
+
+def test_hotplug_add_cannot_double_open_during_try_open(monkeypatch):
+    """0.8.1 audit: try_open (GUI reconnect) racing the hotplug listener's
+    _on_added opened the same hidraw node twice — two live transports, every
+    keypress dispatched twice, and the loser leaking as a zombie reader. The
+    open path is serialized now: the loser must wait, see the winner's
+    device, and skip."""
+    import threading
+
+    monkeypatch.setattr(controller, "FifineDeck", MockDevice)
+    c = DeckController(DeckConfig())
+    dev_a, dev_b = MockDevice(), MockDevice()
+    inside, release = threading.Event(), threading.Event()
+
+    real_open = MockDevice.open
+
+    def slow_open(self):
+        inside.set()
+        release.wait(2)
+        return real_open(self)
+
+    monkeypatch.setattr(MockDevice, "open", slow_open)
+
+    class _Mgr:
+        def enumerate(self):
+            return [dev_a]
+
+    c.manager = _Mgr()
+    c._running = True
+    try:
+        t_open = threading.Thread(target=c.try_open)
+        t_open.start()
+        assert inside.wait(2)              # A holds the open lock, mid-open
+        t_add = threading.Thread(target=lambda: c._on_added(dev_b))
+        t_add.start()
+        time.sleep(0.15)
+        assert not dev_b.opened            # B is blocked, not double-opening
+        release.set()
+        t_open.join(2)
+        t_add.join(2)
+        assert dev_a.opened and c.device is dev_a
+        assert not dev_b.opened            # loser skipped: one transport only
+    finally:
+        release.set()
+        c.stop()

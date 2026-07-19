@@ -54,6 +54,12 @@ class DeckController:
         self.device: Optional[FifineDeck] = None
         self.page_index = 0
         self._lock = threading.RLock()
+        # Serializes the whole open path. try_open (GUI reconnect) racing the
+        # hotplug listener's _on_added could otherwise open the SAME hidraw
+        # node twice — two live transports, every keypress dispatched twice,
+        # and the loser's handle leaking as a zombie reader. Separate from
+        # _lock: opening a device is slow and _lock guards hot paths.
+        self._open_lock = threading.Lock()
         self._listen_thread: Optional[threading.Thread] = None
         self._running = False
         self._gif_keys: set[int] = set()   # logical keys currently animated
@@ -115,21 +121,22 @@ class DeckController:
         and the device re-opened fresh, so keys work immediately without a
         relaunch.
         """
-        if self.device is not None and self.device.firmware_version:
-            return True
-        if self.device is not None:
-            try:
-                self.device.close()
-            except Exception:
-                pass
-            with self._lock:
-                self.device = None
-        if self.manager is None:
-            self.manager = DeviceManager()
-        for dev in self.manager.enumerate():
-            if isinstance(dev, FifineDeck) and self._setup_device(dev):
+        with self._open_lock:
+            if self.device is not None and self.device.firmware_version:
                 return True
-        return False
+            if self.device is not None:
+                try:
+                    self.device.close()
+                except Exception:
+                    pass
+                with self._lock:
+                    self.device = None
+            if self.manager is None:
+                self.manager = DeviceManager()
+            for dev in self.manager.enumerate():
+                if isinstance(dev, FifineDeck) and self._setup_device(dev):
+                    return True
+            return False
 
     def _listen(self):
         try:
@@ -142,8 +149,13 @@ class DeckController:
             log.error("hotplug listener stopped: %s", e)
 
     def _on_added(self, dev):
-        if self._running and isinstance(dev, FifineDeck) and self.device is None:
-            self._setup_device(dev)
+        if not (self._running and isinstance(dev, FifineDeck)):
+            return
+        with self._open_lock:
+            # Re-checked under the lock: a concurrent try_open may have just
+            # opened this very hidraw node with its own device object.
+            if self.device is None:
+                self._setup_device(dev)
 
     def _cancel_holds(self) -> None:
         """Cancel every in-flight long-press. A lost release (unplug mid-hold,

@@ -1078,3 +1078,59 @@ def test_color_picker_never_uses_the_native_dialog(win, monkeypatch):
     w.editor.bg_btn._pick()
     assert seen["non_native"] is True
     assert seen["styled"] is True
+
+
+# -- 0.8.1 audit regressions --------------------------------------------------
+
+def test_deleting_the_viewed_first_page_unbinds_the_editor(win):
+    """0.8.1 audit (high): deleting the currently-viewed page while it is
+    index 0 left (container, page_index) unchanged, so the async resync saw
+    "no change" and never cleared the editor — every subsequent edit went
+    into the deleted Page's objects and silently vanished on restart."""
+    from fifine_deck.model import Page
+    w, cfg, c = win
+    cont = cfg.active_profile()
+    cont.pages.append(Page(name="P2"))
+    w._reload_pages()
+    assert c.page_index == 0                     # viewing the first page
+    doomed = cont.pages[0]
+    w._on_key_selected(1)                        # editor bound to its key 1
+    assert w.selected_index == 1
+    w._del_page()
+    assert doomed not in cont.pages              # the page is really gone
+    assert w.selected_index is None              # editor unbound...
+    w._on_editor_changed()                       # ...so a stray edit is a no-op
+    assert 1 not in cont.pages[0].keys           # nothing materialized anywhere
+
+
+def test_export_config_is_private(tmp_path, win, monkeypatch):
+    """0.8.1 audit: the config can hold a plaintext password (no-keyring
+    fallback). DeckConfig.save keeps it 0600 — the export dialog wrote the
+    same data with the default umask, typically 0644."""
+    w, cfg, c = win
+    out = tmp_path / "export.json"
+    monkeypatch.setattr(mw.QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (str(out), "JSON (*.json)")))
+    w._export_config()
+    assert out.exists()
+    assert (out.stat().st_mode & 0o777) == 0o600
+
+
+def test_unknown_action_type_does_not_pollute_other_keys(qapp):
+    """0.8.1 audit: the entry set_action injects for an unknown/excluded
+    action type stayed in the SHARED type combo forever, offering the type
+    on every later-edited key — and choosing it there slipped past the
+    unknown-type guard and stored a dead Action(type, {})."""
+    from fifine_deck.gui.widgets import ActionParamsWidget
+    from fifine_deck.model import Action
+
+    ed = ActionParamsWidget()
+    base = ed.type_combo.count()
+    ed.set_action(Action("from_the_future", {"x": 1}))
+    assert ed.type_combo.count() == base + 1     # visible for THIS key
+    assert ed.get_action(peek=True).params == {"x": 1}   # round-trips verbatim
+    ed.set_action(Action("from_the_future", {"x": 1}))   # same key again
+    assert ed.type_combo.count() == base + 1     # no duplicates
+    ed.set_action(Action("hotkey", {"keys": "ctrl+c"}))  # a different key
+    assert ed.type_combo.count() == base         # injected entry withdrawn
+    assert ed.type_combo.findData("from_the_future") == -1

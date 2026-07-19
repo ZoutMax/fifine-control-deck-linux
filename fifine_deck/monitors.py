@@ -176,7 +176,9 @@ class Sampler:
         self._vram_backend = None      # probed lazily; ("none",) when absent
         self._gpu_backend = None       # same lifecycle as _vram_backend
         self._gputemp_backend = None   # same lifecycle as _vram_backend
-        self._gputemp_retries = 0      # bounded: a dead sensor must settle
+        self._vram_retries = 0         # bounded: a dead source must settle
+        self._gpu_retries = 0
+        self._gputemp_retries = 0
         # psutil keys its cpu_percent since-last-call baseline PER THREAD, so
         # priming must be per thread too — a flag primed on one thread would
         # let another thread's first (garbage) reading through as real.
@@ -257,15 +259,36 @@ class Sampler:
         return Reading(None, f"↓ {_fmt_rate(down)}", f"↑ {_fmt_rate(up)}",
                        sample=down)
 
+    def _resolve_gpu_backend(self, attr: str, probe, retries_attr: str):
+        """Shared probe/retry/settle lifecycle for the GPU-family backends.
+
+        "retry" (NVML installed but not ready — driver still loading at
+        login) is NOT cached: probe again next sample instead of freezing on
+        n/a forever. But retries are bounded — ~20 samples (>= 10 s at the
+        fastest interval) covers a loading driver; after that the source is
+        treated as permanently unavailable and a FINAL probe settles on the
+        best remaining answer (amdgpu if that's what the machine has, else
+        none) so we stop re-running import+nvmlInit every interval."""
+        b = getattr(self, attr)
+        if b is not None:
+            return b
+        b = probe()
+        if b[0] != "retry":
+            setattr(self, attr, b)
+            setattr(self, retries_attr, 0)
+            return b
+        n = getattr(self, retries_attr) + 1
+        setattr(self, retries_attr, n)
+        if n >= 20:
+            b = probe(final=True)
+            if b[0] == "retry":
+                b = ("none",)
+            setattr(self, attr, b)
+        return b
+
     def _sample_vram(self, spec: MonitorSpec) -> Reading:
-        b = self._vram_backend
-        if b is None:
-            b = _probe_vram()
-            if b[0] != "retry":
-                # "retry" (NVML installed but not ready — driver still
-                # loading?) is deliberately NOT cached: probe again next
-                # sample instead of freezing on n/a forever.
-                self._vram_backend = b
+        b = self._resolve_gpu_backend("_vram_backend", _probe_vram,
+                                      "_vram_retries")
         if b[0] not in ("nvml", "amdgpu"):
             return Reading(None, "n/a", "no dedicated GPU", ok=False)
         try:
@@ -288,12 +311,8 @@ class Sampler:
                        f"{_fmt_bytes(used)} / {_fmt_bytes(total)}", sample=pct)
 
     def _sample_gpu(self, spec: MonitorSpec) -> Reading:
-        b = self._gpu_backend
-        if b is None:
-            b = _probe_gpu()
-            if b[0] != "retry":
-                # "retry" is NOT cached — probe again next sample (see vram).
-                self._gpu_backend = b
+        b = self._resolve_gpu_backend("_gpu_backend", _probe_gpu,
+                                      "_gpu_retries")
         if b[0] not in ("nvml", "amdgpu"):
             return Reading(None, "n/a", "no dedicated GPU", ok=False)
         try:
@@ -311,20 +330,8 @@ class Sampler:
     def _sample_gputemp(self, spec: MonitorSpec) -> Reading:
         """GPU temperature with the sensor auto-picked per vendor — the
         one-click alternative to a manual temp target like "amdgpu:edge"."""
-        b = self._gputemp_backend
-        if b is None:
-            b = _probe_gputemp()
-            if b[0] != "retry":
-                self._gputemp_backend = b
-                self._gputemp_retries = 0
-            else:
-                # ~20 samples (>= 10 s) covers a driver still loading at
-                # login; a sensor that still fails then is permanent — stop
-                # re-running import+nvmlInit every interval forever.
-                self._gputemp_retries += 1
-                if self._gputemp_retries >= 20:
-                    b = ("none",)
-                    self._gputemp_backend = b
+        b = self._resolve_gpu_backend("_gputemp_backend", _probe_gputemp,
+                                      "_gputemp_retries")
         if b[0] not in ("nvml", "amdgpu"):
             return Reading(None, "n/a", "no GPU sensor", ok=False)
         try:
@@ -421,17 +428,49 @@ def _pkg_entry(entries):
     return entries[0]
 
 
-def _probe_vram():
+_PCI_DEVICES = "/sys/bus/pci/devices"
+
+
+def _nvidia_gpu_present() -> bool:
+    """Is an NVIDIA display device on the PCI bus? Driver-independent: sysfs
+    exposes vendor/class before (and without) the nvidia module loading. This
+    is what lets the probes tell "NVML failed because there is no NVIDIA GPU"
+    (fall through to amdgpu now) from "failed because the driver isn't up yet"
+    (retry — on a hybrid machine the amdgpu node is the iGPU, and caching it
+    would pin the key to the wrong GPU for the process lifetime).
+    Cached after the first scan: PCI topology doesn't change under us."""
+    cached = getattr(_nvidia_gpu_present, "_cached", None)
+    if cached is None:
+        cached = False
+        for vf in glob.glob(os.path.join(_PCI_DEVICES, "*", "vendor")):
+            try:
+                with open(vf) as f:
+                    if f.read().strip().lower() != "0x10de":
+                        continue
+                with open(os.path.join(os.path.dirname(vf), "class")) as f:
+                    # 0x03xxxx == PCI display controller class
+                    if f.read().strip().lower().startswith("0x03"):
+                        cached = True
+                        break
+            except OSError:
+                continue
+        _nvidia_gpu_present._cached = cached
+    return cached
+
+
+def _probe_vram(final: bool = False):
     """Find a VRAM source: NVIDIA via NVML, AMD via sysfs, else none.
     Intel iGPUs share system RAM — there is nothing meaningful to report.
 
     NVML failing does NOT mean no GPU: pynvml is pure Python (the deb
     Recommends it, the snap bundles it), so on AMD-only machines the import
-    succeeds and nvmlInit() raises library-not-found forever. The amdgpu
-    sysfs probe therefore runs on ANY NVML failure — ("retry",) is only
-    returned when NVML failed AND no amdgpu node exists (e.g. an NVIDIA
-    driver still loading), so the caller re-probes instead of caching a
-    permanent failure."""
+    succeeds and nvmlInit() raises library-not-found forever — the amdgpu
+    sysfs probe must still run. But when NVIDIA *hardware* is on the PCI bus,
+    an NVML failure means the driver isn't up yet (login) — then amdgpu must
+    NOT run: on hybrid machines it is the iGPU, and the 0.8.1 audit found the
+    init-failure path pinning keys to it forever. ("retry",) is re-probed by
+    the caller, bounded; final=True is the caller settling after the retry
+    budget: best remaining answer only, never another retry."""
     nvml_present = False
     try:
         import pynvml
@@ -440,17 +479,19 @@ def _probe_vram():
         return ("nvml", pynvml, pynvml.nvmlDeviceGetHandleByIndex(0))
     except Exception:
         pass
+    if nvml_present and not final and _nvidia_gpu_present():
+        return ("retry",)
     for total in sorted(glob.glob("/sys/class/drm/card*/device/mem_info_vram_total")):
         used = os.path.join(os.path.dirname(total), "mem_info_vram_used")
         if os.path.exists(used):
             return ("amdgpu", used, total)
-    return ("retry",) if nvml_present else ("none",)
+    return ("retry",) if (nvml_present and not final) else ("none",)
 
 
-def _probe_gpu():
+def _probe_gpu(final: bool = False):
     """Find a GPU-load source: NVIDIA via NVML utilization rates, AMD via the
-    sysfs gpu_busy_percent file. Same fallback/retry semantics as
-    _probe_vram (see there for why amdgpu must run after an NVML failure)."""
+    sysfs gpu_busy_percent file. Same fallback/retry/final semantics as
+    _probe_vram (see there for the hybrid-machine reasoning)."""
     nvml_present = False
     try:
         import pynvml
@@ -459,21 +500,25 @@ def _probe_gpu():
         return ("nvml", pynvml, pynvml.nvmlDeviceGetHandleByIndex(0))
     except Exception:
         pass
+    if nvml_present and not final and _nvidia_gpu_present():
+        return ("retry",)
     for busy in sorted(glob.glob("/sys/class/drm/card*/device/gpu_busy_percent")):
         return ("amdgpu", busy)
-    return ("retry",) if nvml_present else ("none",)
+    return ("retry",) if (nvml_present and not final) else ("none",)
 
 
-def _probe_gputemp():
+def _probe_gputemp(final: bool = False):
     """Find a GPU temperature source: NVIDIA via NVML, AMD via the amdgpu
     chip in psutil's sensors (edge is the conventional die-edge sensor).
 
     A WORKING nvmlInit means an NVIDIA GPU exists — a failed sensor read then
     returns ("retry",) and never falls through to amdgpu: on hybrid laptops
     the amdgpu chip is the iGPU, and caching it would pin the key to the
-    wrong GPU forever (0.8.0 audit). The amdgpu fallback runs only when NVML
-    itself is unavailable. The caller caps retries so a permanently
-    unsupported sensor settles instead of re-probing every sample."""
+    wrong GPU forever (0.8.0 audit). When nvmlInit itself fails but NVIDIA
+    *hardware* is on the PCI bus (driver still loading at login — the
+    init-failure hole the 0.8.1 audit found), amdgpu must equally not run.
+    The caller caps retries and settles with final=True: best remaining
+    answer only, never another retry."""
     nvml_importable = False
     nvml_inited = False
     try:
@@ -493,15 +538,16 @@ def _probe_gputemp():
             except Exception:
                 pass
             return ("retry",)
-    # NVML unavailable (import or init failed): AMD sysfs sensors are the
-    # right answer on AMD machines; otherwise retry (bounded by the caller)
-    # while an NVIDIA driver may still be loading.
+    if nvml_importable and not final and _nvidia_gpu_present():
+        return ("retry",)
+    # No NVIDIA route (or settling): AMD sysfs sensors are the right answer
+    # on AMD machines; otherwise retry (bounded) while a driver may load.
     if psutil is not None:
         temps: dict = getattr(psutil, "sensors_temperatures", lambda: {})() or {}
         for want in ("amdgpu:edge", "amdgpu"):
             if _pick_temp(temps, want) is not None:
                 return ("amdgpu", want)
-    return ("retry",) if nvml_importable else ("none",)
+    return ("retry",) if (nvml_importable and not final) else ("none",)
 
 
 # ---------------------------------------------------------------------------

@@ -300,12 +300,17 @@ class ColorButton(QPushButton):
         dlg.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
         from .style import STYLESHEET
         dlg.setStyleSheet(STYLESHEET)
-        if dlg.exec():
-            c = dlg.selectedColor()
-            if c.isValid():
-                self._color = c.name()
-                self._apply()
-                self.changed.emit(self._color)
+        try:
+            if dlg.exec():
+                c = dlg.selectedColor()
+                if c.isValid():
+                    self._color = c.name()
+                    self._apply()
+                    self.changed.emit(self._color)
+        finally:
+            # exec() only hides the dialog; parented to a long-lived button
+            # it would otherwise accumulate one widget tree per pick.
+            dlg.deleteLater()
 
     def color(self):
         return self._color
@@ -328,6 +333,7 @@ class ActionParamsWidget(QWidget):
         self._params: dict[str, QWidget] = {}
         self._multi_editor = None
         self._orig_action = Action()      # last action given to set_action
+        self._injected_index = None       # combo entry added for an unknown type
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         # Owned by self so it outlives the combos it filters.
@@ -350,6 +356,15 @@ class ActionParamsWidget(QWidget):
         # know (config written by a newer version) must round-trip untouched,
         # not be downgraded to the combo's first entry on the next edit.
         self._orig_action = Action(action.type, dict(action.params))
+        # Drop the extra entry a PREVIOUS key's unknown/excluded type
+        # injected — it belongs to that key alone. Left in the shared combo
+        # it shows up in every later-edited key's dropdown, and choosing it
+        # there slips past the unknown-type guard (which compares against the
+        # WRONG _orig_action) and stores a dead Action(type, {}).
+        if self._injected_index is not None and \
+                self.type_combo.itemData(self._injected_index) != action.type:
+            self.type_combo.removeItem(self._injected_index)
+            self._injected_index = None
         i = self.type_combo.findData(action.type)
         if i < 0:
             # Either a type this editor normally excludes (e.g. a monitor
@@ -359,6 +374,7 @@ class ActionParamsWidget(QWidget):
             label = ACTION_TYPES.get(action.type, {}).get("label", action.type)
             self.type_combo.addItem(label, action.type)
             i = self.type_combo.findData(action.type)
+            self._injected_index = i
         self.type_combo.setCurrentIndex(max(0, i))
         self._build(action.type, action.params)
         self._building = False

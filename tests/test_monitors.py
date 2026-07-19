@@ -852,9 +852,11 @@ class _DeadNVML:
 def test_probe_gpu_falls_back_to_amdgpu_when_nvml_is_dead(tmp_path, monkeypatch):
     """deb Recommends / snap bundles pynvml unconditionally, so on AMD systems
     the import succeeds and nvmlInit() fails forever — the sysfs backend must
-    still be found (the buggy probe returned ("retry",) forever instead)."""
+    still be found (the buggy probe returned ("retry",) forever instead).
+    AMD-only: no NVIDIA hardware on the bus."""
     import sys as _sys
     monkeypatch.setitem(_sys.modules, "pynvml", _DeadNVML)
+    monkeypatch.setattr(monitors, "_nvidia_gpu_present", lambda: False)
     busy = tmp_path / "gpu_busy_percent"
     busy.write_text("55\n")
     monkeypatch.setattr(monitors.glob, "glob",
@@ -867,6 +869,7 @@ def test_probe_gpu_falls_back_to_amdgpu_when_nvml_is_dead(tmp_path, monkeypatch)
 def test_probe_gpu_retry_only_when_nvml_present_and_no_amdgpu(monkeypatch):
     import sys as _sys
     monkeypatch.setattr(monitors.glob, "glob", lambda pat: [])
+    monkeypatch.setattr(monitors, "_nvidia_gpu_present", lambda: False)
     monkeypatch.setitem(_sys.modules, "pynvml", _DeadNVML)
     assert monitors._probe_gpu() == ("retry",)
     monkeypatch.setitem(_sys.modules, "pynvml", None)     # import -> ImportError
@@ -877,6 +880,7 @@ def test_probe_vram_falls_back_to_amdgpu_when_nvml_is_dead(tmp_path, monkeypatch
     """_probe_vram shipped the same NVML-shadows-amdgpu flaw since 0.6.0."""
     import sys as _sys
     monkeypatch.setitem(_sys.modules, "pynvml", _DeadNVML)
+    monkeypatch.setattr(monitors, "_nvidia_gpu_present", lambda: False)
     total = tmp_path / "mem_info_vram_total"
     used = tmp_path / "mem_info_vram_used"
     total.write_text("1000")
@@ -886,6 +890,85 @@ def test_probe_vram_falls_back_to_amdgpu_when_nvml_is_dead(tmp_path, monkeypatch
     assert monitors._probe_vram() == ("amdgpu", str(used), str(total))
     monkeypatch.setattr(monitors.glob, "glob", lambda pat: [])
     assert monitors._probe_vram() == ("retry",)
+
+
+# ---------------------------------------------------------------------------
+# 0.8.1 audit findings (regressions pinned)
+# ---------------------------------------------------------------------------
+def _fake_amdgpu_fs(tmp_path, monkeypatch):
+    busy = tmp_path / "gpu_busy_percent"
+    busy.write_text("55\n")
+    total = tmp_path / "mem_info_vram_total"
+    (tmp_path / "mem_info_vram_used").write_text("250")
+    total.write_text("1000")
+
+    def fake_glob(pat):
+        if "gpu_busy_percent" in pat:
+            return [str(busy)]
+        if "vram_total" in pat:
+            return [str(total)]
+        return []
+    monkeypatch.setattr(monitors.glob, "glob", fake_glob)
+
+
+def test_probes_hold_out_for_nvidia_hardware_on_hybrid(tmp_path, monkeypatch):
+    """0.8.1 audit: on a hybrid machine (AMD iGPU + NVIDIA dGPU) a single
+    failed nvmlInit at login — driver still loading — fell through to the
+    amdgpu probe, and the sampler cached the iGPU sensor for the process
+    lifetime. With NVIDIA hardware on the PCI bus, an NVML failure must mean
+    retry, not amdgpu."""
+    import sys as _sys
+    monkeypatch.setitem(_sys.modules, "pynvml", _DeadNVML)
+    monkeypatch.setattr(monitors, "_nvidia_gpu_present", lambda: True)
+    _fake_amdgpu_fs(tmp_path, monkeypatch)
+    assert monitors._probe_gpu() == ("retry",)
+    assert monitors._probe_vram() == ("retry",)
+    assert monitors._probe_gputemp() == ("retry",)
+    # Settling (final=True) after the retry budget takes the best remaining
+    # answer — the iGPU is then a deliberate last resort, not an accident.
+    assert monitors._probe_gpu(final=True)[0] == "amdgpu"
+    assert monitors._probe_vram(final=True)[0] == "amdgpu"
+
+
+def test_sampler_settles_after_retry_budget(monkeypatch):
+    """A source that never comes up must stop re-probing every interval:
+    after the retry budget the sampler runs one final probe and caches its
+    answer (here: none)."""
+    calls = []
+
+    def probe(final=False):
+        calls.append(final)
+        return ("retry",)
+
+    monkeypatch.setattr(monitors, "_probe_gpu", probe)
+    s = Sampler()
+    spec = MonitorSpec.from_params({"metric": "gpu"})
+    for _ in range(25):
+        assert not s.sample(spec).ok
+    assert s._gpu_backend == ("none",)         # settled, cached
+    assert calls.count(True) == 1              # exactly one final probe
+    assert len(calls) == 21                    # 20 retries + the final
+    assert not s.sample(spec).ok               # steady state: no more probing
+    assert len(calls) == 21
+
+
+def test_nvidia_gpu_present_reads_pci_sysfs(tmp_path, monkeypatch):
+    dev = tmp_path / "0000:01:00.0"
+    dev.mkdir()
+    (dev / "vendor").write_text("0x10de\n")
+    (dev / "class").write_text("0x030000\n")
+    other = tmp_path / "0000:06:00.0"
+    other.mkdir()
+    (other / "vendor").write_text("0x10ec\n")   # realtek NIC
+    (other / "class").write_text("0x020000\n")
+    monkeypatch.setattr(monitors, "_PCI_DEVICES", str(tmp_path))
+    monkeypatch.setattr(monitors._nvidia_gpu_present, "_cached", None,
+                        raising=False)
+    assert monitors._nvidia_gpu_present() is True
+    (dev / "vendor").write_text("0x1002\n")     # now AMD-only
+    monkeypatch.setattr(monitors._nvidia_gpu_present, "_cached", None,
+                        raising=False)
+    assert monitors._nvidia_gpu_present() is False
 
 
 def test_clock_format_bands_do_not_share_a_stream(monkeypatch):
@@ -963,6 +1046,7 @@ def test_gputemp_none_and_death_reprobe(monkeypatch):
 def test_gputemp_probe_prefers_nvml_then_amdgpu_sensors(monkeypatch):
     import sys as _sys
     monkeypatch.setitem(_sys.modules, "pynvml", _DeadNVML)
+    monkeypatch.setattr(monitors, "_nvidia_gpu_present", lambda: False)
     _fake_temps(monkeypatch, {"amdgpu": [_shw("edge", 57.0, None, None)]})
     assert monitors._probe_gputemp() == ("amdgpu", "amdgpu:edge")
     _fake_temps(monkeypatch, {})
@@ -1057,8 +1141,8 @@ def test_gputemp_probe_never_falls_from_working_nvml_to_amdgpu(monkeypatch):
 def test_gputemp_retry_settles_after_bounded_attempts(monkeypatch):
     """A permanently failing sensor must stop re-probing every sample."""
     probes = []
-    def probe():
-        probes.append(1)
+    def probe(final=False):
+        probes.append(final)
         return ("retry",)
     monkeypatch.setattr(monitors, "_probe_gputemp", probe)
     s = Sampler()
@@ -1066,7 +1150,8 @@ def test_gputemp_retry_settles_after_bounded_attempts(monkeypatch):
     for _ in range(25):
         s.sample(spec)
     assert s._gputemp_backend == ("none",)             # settled
-    assert len(probes) == 20                           # probing stopped
+    assert len(probes) == 21                           # 20 retries + 1 final
+    assert probes.count(True) == 1                     # probing stopped
 
 
 def test_clock_12h_ampm_is_locale_proof_and_disambiguates_midnight(monkeypatch):
