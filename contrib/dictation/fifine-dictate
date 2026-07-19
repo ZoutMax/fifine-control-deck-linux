@@ -1,0 +1,72 @@
+#!/bin/bash
+# Push-to-talk dictation for the fifine deck (or any hotkey).
+#
+# First press:  starts recording from the default microphone.
+# Second press: stops, transcribes locally (Whisper on the GPU), and TYPES
+#               the text into the focused window (ydotool, Wayland-safe).
+#
+#   fifine-dictate            toggle record/transcribe+type
+#   fifine-dictate --dry-run  transcribe but print to stdout instead of typing
+#
+# All local: audio never leaves this machine.
+set -u
+DIR="$HOME/.local/share/fifine-dictation"
+SOCK=/tmp/fifine-dictate.sock
+WAV=/tmp/fifine-dictate.wav
+PIDFILE=/tmp/fifine-dictate.pid
+DRY="${1:-}"
+
+ensure_server() {
+    if [ ! -S "$SOCK" ] || ! python3 - << 'PY' 2>/dev/null
+import socket
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(1)
+s.connect("/tmp/fifine-dictate.sock")
+s.close()
+PY
+    then
+        nohup "$DIR/venv/bin/python" "$DIR/server.py" > /tmp/fifine-dictate-server.log 2>&1 &
+        for _ in $(seq 1 60); do [ -S "$SOCK" ] && break; sleep 0.5; done
+    fi
+}
+
+if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    # ---- second press: stop + transcribe + type -------------------------
+    kill "$(cat "$PIDFILE")" 2>/dev/null
+    rm -f "$PIDFILE"
+    sleep 0.3                       # let the wav flush
+    TEXT=$(python3 - "$WAV" << 'PY'
+import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(120)
+s.connect("/tmp/fifine-dictate.sock")
+s.sendall((sys.argv[1] + "\n").encode())
+buf = b""
+while not buf.endswith(b"\n"):
+    chunk = s.recv(4096)
+    if not chunk:
+        break
+    buf += chunk
+print(buf.decode().strip())
+PY
+    )
+    if [ -z "$TEXT" ]; then
+        spd-say -r -20 "I did not catch that."
+        exit 0
+    fi
+    if [ "$DRY" = "--dry-run" ]; then
+        echo "$TEXT"
+    else
+        printf '%s' "$TEXT" | ydotool type --file /dev/stdin
+        # auto-send: press Enter after the text (28 = KEY_ENTER), unless
+        # dictating into a document where a newline would be unwanted
+        case "$*" in *--no-enter*) ;; *) ydotool key 28:1 28:0 ;; esac
+    fi
+else
+    # ---- first press: start recording -----------------------------------
+    ensure_server                    # warm the model while the user talks
+    rm -f "$WAV"
+    spd-say -w -r -10 "listening"    # cue BEFORE recording starts (blocks)
+    parecord --format=s16le --rate=16000 --channels=1 "$WAV" &
+    echo $! > "$PIDFILE"
+fi
