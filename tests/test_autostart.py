@@ -102,26 +102,41 @@ def test_flatpak_gui_config_is_updated_in_place_not_reloaded(xdg, monkeypatch):
     assert loads == []                                        # no disk round-trip
 
 
-def test_quit_flag_waits_until_the_instance_is_gone(monkeypatch, capsys):
+def test_quit_flag_waits_until_the_instance_is_gone(tmp_path, monkeypatch, capsys):
     """--quit must be synchronous: returning while the old instance is still
     dying makes quit-and-relaunch a race, and the relaunch defers to the
-    zombie (the user then keeps testing stale code — bit us twice)."""
+    zombie. The wait must poll the socket FILE, never connect — older
+    versions treat any connection as "show", interrupting their shutdown."""
+    sock = tmp_path / "ipc.sock"
+    sock.write_text("")
     calls = []
 
     def fake_signal(cmd):
         calls.append(cmd)
-        if cmd == "quit":
-            return True
-        return len([c for c in calls if c == "ping"]) < 3   # dies on 3rd ping
+        return True
     monkeypatch.setattr(app, "_signal_existing", fake_signal)
+    monkeypatch.setattr(app, "_ipc_socket_path", lambda: str(sock))
+    checks = {"n": 0}
+    real_exists = app.os.path.exists
+
+    def counting_exists(p):
+        if p == str(sock):
+            checks["n"] += 1
+            if checks["n"] >= 3:
+                sock.unlink(missing_ok=True)     # instance exits on 3rd poll
+        return real_exists(p)
+    monkeypatch.setattr(app.os.path, "exists", counting_exists)
     rc = app.run_gui(quit_flag=True)
     assert rc == 0
-    assert calls[0] == "quit" and calls.count("ping") == 3
+    assert calls == ["quit"]                     # ONE signal, zero pings
     assert "stopped" in capsys.readouterr().out
 
 
-def test_quit_flag_reports_a_stuck_instance(monkeypatch):
-    monkeypatch.setattr(app, "_signal_existing", lambda cmd: True)  # never dies
+def test_quit_flag_reports_a_stuck_instance(tmp_path, monkeypatch):
+    sock = tmp_path / "ipc.sock"
+    sock.write_text("")                          # never removed: stuck
+    monkeypatch.setattr(app, "_signal_existing", lambda cmd: True)
+    monkeypatch.setattr(app, "_ipc_socket_path", lambda: str(sock))
     import time as _time
     t = {"now": 0.0}
     monkeypatch.setattr(_time, "monotonic", lambda: t.__setitem__("now", t["now"] + 3) or t["now"])

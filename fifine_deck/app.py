@@ -15,6 +15,13 @@ import os
 
 _IPC_NAME = f"fifine-control-deck-{os.getuid()}"
 
+
+def _ipc_socket_path() -> str:
+    """The QLocalServer socket file (Qt puts named local sockets in the
+    temp dir on Linux). Its existence is a poke-free liveness signal."""
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), _IPC_NAME)
+
 log = logging.getLogger(__name__)
 
 
@@ -216,11 +223,13 @@ def run_gui(quit_flag: bool = False, hidden: bool = False) -> int:
             # Wait for the instance to actually exit: returning while it is
             # still shutting down makes "quit && relaunch" a race — the new
             # launch defers to the dying instance and the user keeps running
-            # stale code (bit us twice during 0.8.1 testing).
+            # stale code (bit us twice during 0.8.1 testing). Poll the IPC
+            # socket FILE, never connect: older versions treat any incoming
+            # connection as "show", which interrupts their own shutdown.
             import time as _time
             deadline = _time.monotonic() + 10.0
             while _time.monotonic() < deadline:
-                if not _signal_existing("ping"):
+                if not os.path.exists(_ipc_socket_path()):
                     print("Running instance stopped.")
                     return 0
                 _time.sleep(0.2)
