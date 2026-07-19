@@ -289,7 +289,11 @@ class ColorButton(QPushButton):
         self.setText(self._color)
 
     def _pick(self):
-        c = QColorDialog.getColor(QColor(self._color), self)
+        # Force Qt's own dialog: the native color chooser ignores the app's
+        # dark stylesheet (white window, unreadable with themed text).
+        c = QColorDialog.getColor(
+            QColor(self._color), self, "Choose color",
+            QColorDialog.ColorDialogOption.DontUseNativeDialog)
         if c.isValid():
             self._color = c.name()
             self._apply()
