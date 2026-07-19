@@ -54,6 +54,13 @@ PY
         spd-say -r -20 "I did not catch that."
         exit 0
     fi
+    if [ "${#TEXT}" -gt 600 ]; then
+        # A runaway recording produced an essay: never type it blindly into
+        # the focused window. Park it in a file instead.
+        printf '%s\n' "$TEXT" > /tmp/fifine-dictate-last.txt
+        spd-say -r -20 "That was very long. I saved it to a file instead of typing it."
+        exit 0
+    fi
     if [ "$DRY" = "--dry-run" ]; then
         echo "$TEXT"
     else
@@ -67,6 +74,6 @@ else
     ensure_server                    # warm the model while the user talks
     rm -f "$WAV"
     spd-say -w -r -10 "listening"    # cue BEFORE recording starts (blocks)
-    parecord --format=s16le --rate=16000 --channels=1 "$WAV" &
+    timeout 90 parecord --format=s16le --rate=16000 --channels=1 "$WAV" &
     echo $! > "$PIDFILE"
 fi
