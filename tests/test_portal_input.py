@@ -98,3 +98,35 @@ def test_prime_caches_the_session(monkeypatch):
     assert portal_input.prime() is True
     assert len(calls) == 1
     assert portal_input.available() is True
+
+
+def test_session_handle_is_sent_as_an_object_path(monkeypatch):
+    """Live-caught regression: the portal declares the session handle as "o"
+    (object path). PyQt marshals a bare Python string as "s", and the portal
+    rejects the whole call with a type mismatch, so the session could never
+    be established. Every call that carries the handle must wrap it."""
+    from PyQt6.QtDBus import QDBusObjectPath
+    monkeypatch.setattr(portal_input, "_SESSION", "/org/freedesktop/portal/x")
+    seen = []
+
+    class _Reply:
+        @staticmethod
+        def errorName():
+            return ""
+
+    class _Iface:
+        def __init__(self, *a):
+            pass
+
+        def call(self, method, *args):
+            seen.append(args[0])
+            return _Reply()
+
+    import PyQt6.QtDBus as qtdbus
+    monkeypatch.setattr(qtdbus, "QDBusInterface", _Iface)
+    assert portal_input._notify("NotifyKeyboardKeycode", 183, 1) is True
+    assert seen, "no call was made"
+    assert isinstance(seen[0], QDBusObjectPath), (
+        f"session handle marshalled as {type(seen[0]).__name__}, not an "
+        "object path: the portal will reject it")
+    assert seen[0].path() == "/org/freedesktop/portal/x"

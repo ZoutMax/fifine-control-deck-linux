@@ -20,7 +20,8 @@ binaries, which makes the app work in more places, not only in a Flatpak.
   sandbox, and it also fixes a plain Wayland desktop where ydotool was never
   set up (it needs a daemon plus uinput access). A working helper tool is
   still preferred, so users who have one see no change and no consent
-  prompt.
+  prompt. Verified end to end on GNOME/Wayland hardware: consent granted,
+  restore token persisted, keystroke injected.
 
 ### Changed
 - The Flatpak manifest asks for `--talk-name=org.mpris.MediaPlayer2.*` (the

@@ -135,7 +135,7 @@ def _create_session() -> Optional[str]:
     import sys
 
     from PyQt6.QtCore import QCoreApplication, QMetaType
-    from PyQt6.QtDBus import QDBusArgument, QDBusConnection
+    from PyQt6.QtDBus import QDBusArgument, QDBusConnection, QDBusObjectPath
 
     from .app import _portal_token_seq
 
@@ -171,12 +171,15 @@ def _create_session() -> Optional[str]:
     if restore:
         opts["restore_token"] = restore
     if _call_portal(bus, "org.freedesktop.portal.RemoteDesktop",
-                    "SelectDevices", [session, opts], t2) is None:
+                    "SelectDevices",
+                    [QDBusObjectPath(session), opts], t2) is None:
         return None
 
     t3 = tok()
     started = _call_portal(bus, "org.freedesktop.portal.RemoteDesktop",
-                           "Start", [session, "", {"handle_token": t3}], t3)
+                           "Start",
+                           [QDBusObjectPath(session), "",
+                            {"handle_token": t3}], t3)
     if started is None:
         return None
     if started.get("restore_token"):
@@ -210,12 +213,13 @@ def _notify(method: str, value: int, state: int) -> bool:
     if _SESSION is None:
         return False
     from PyQt6.QtCore import QMetaType
-    from PyQt6.QtDBus import QDBusArgument, QDBusConnection, QDBusInterface
+    from PyQt6.QtDBus import (QDBusArgument, QDBusConnection, QDBusInterface,
+                              QDBusObjectPath)
     bus = QDBusConnection.sessionBus()
     iface = QDBusInterface("org.freedesktop.portal.Desktop",
                            "/org/freedesktop/portal/desktop",
                            "org.freedesktop.portal.RemoteDesktop", bus)
-    reply = iface.call(method, _SESSION, {}, value,
+    reply = iface.call(method, QDBusObjectPath(_SESSION), {}, value,
                        QDBusArgument(state, QMetaType.Type.UInt.value))  # type: ignore[call-overload]
     if reply.errorName():
         log.warning("remote desktop %s: %s", method, reply.errorMessage())
