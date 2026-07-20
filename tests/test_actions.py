@@ -155,3 +155,30 @@ def test_existing_helper_tool_still_wins(monkeypatch):
     monkeypatch.setattr(actions, "_run", lambda a, **k: ran.append(a))
     actions._send_hotkey("ctrl+c")
     assert ran and ran[0][0] == "xdotool"
+
+
+def test_audio_tools_are_found_inside_the_sandbox(monkeypatch):
+    """The KDE runtime ships pactl and --socket=pulseaudio reaches the real
+    audio server, so volume control needs NO host access. An over-eager
+    host-access check made every tool look missing and silently disabled
+    volume in the sandbox."""
+    import shutil
+    monkeypatch.setattr(actions, "IN_FLATPAK", True)
+    monkeypatch.setattr(actions, "_host_access", False)     # no host grant
+    monkeypatch.setattr(shutil, "which", lambda c: "/usr/bin/" + c
+                        if c in ("pactl",) else None)
+    assert actions._has("pactl") is True          # in the sandbox: usable
+    assert actions._has("ydotool") is False       # host-only: correctly absent
+
+
+def test_host_only_tools_still_need_host_access(monkeypatch):
+    """A tool that happens to exist in the sandbox but only makes sense on
+    the host (window management, process control) must not be reported as
+    usable just because the binary is present."""
+    import shutil
+    monkeypatch.setattr(actions, "IN_FLATPAK", True)
+    monkeypatch.setattr(actions, "_host_access", False)
+    monkeypatch.setattr(shutil, "which", lambda c: "/usr/bin/" + c)  # all present
+    assert actions._has("pkill") is False
+    assert actions._has("wmctrl") is False
+    assert actions._has("pactl") is True          # only the allowlist passes

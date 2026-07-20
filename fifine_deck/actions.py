@@ -100,11 +100,22 @@ def _host(args):
     return list(args)
 
 
+# Tools that do their job correctly from INSIDE the sandbox, because what
+# they drive is reachable through a granted socket rather than the host
+# filesystem: the audio CLIs talk to PipeWire/PulseAudio over
+# --socket=pulseaudio. Everything else (input injection, window management,
+# launching the user's apps) is only meaningful on the host.
+SANDBOX_CAPABLE = frozenset({"pactl", "wpctl"})
+
+
 def _has(cmd: str) -> bool:
-    """Is `cmd` available? Inside Flatpak, probe the HOST — the sandbox PATH
-    would not see host-side tools."""
+    """Is `cmd` usable? Inside Flatpak, look in the SANDBOX first for the
+    tools that work there (the KDE runtime ships pactl, so volume control
+    needs no host access at all), then probe the HOST for the rest."""
+    if IN_FLATPAK and cmd in SANDBOX_CAPABLE and shutil.which(cmd):
+        return True
     if IN_FLATPAK and not host_access_available():
-        return False           # no route to the host: nothing is "available"
+        return False           # no route to the host: nothing else is usable
     if IN_FLATPAK:
         try:
             r = subprocess.run(
