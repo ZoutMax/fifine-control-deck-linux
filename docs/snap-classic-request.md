@@ -49,6 +49,16 @@ as soon as classic is granted. Thanks!
       supported classic categories, and classic is "reserved for mature
       projects" — the repo was a week old. Answered asking whether any strict
       route to `/dev/hidraw` exists on classic desktops.
-- [ ] **Parked.** Revisit when the project has a longer track record; ask again
-      then whether a supported category fits, or whether a strict route has
-      appeared. Nothing is published to the store meanwhile.
+- [x] Canonical store admin (jslarraz) replied 2026-07-20: CONFIRMS there is
+      no strict-confinement route to /dev/hidraw on classic desktops today.
+      Suggested path: contribute a new snapd interface granting access to
+      specific devices (modeled on `u2f_devices`, see
+      snapd/interfaces/builtin/u2f_devices.go) but with vendor_id/product_id
+      as plug attributes: "no concrete plan as of now, but PRs are always
+      welcome". Also tentatively agreed that keeping the broken stable
+      channel closed is the right convention (pinged @store to confirm).
+- [ ] **Parked.** Revisit when the project has a longer track record. Two
+      routes then: (a) re-ask for classic with the maturity dossier, or
+      (b) the stronger play: contribute the vendor/product-scoped hidraw
+      interface to snapd, which would allow a STRICT snap and build exactly
+      the track record reviewers want. Nothing is published meanwhile.
