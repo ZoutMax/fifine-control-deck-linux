@@ -316,9 +316,18 @@ def _ydotool_keycodes(combo: str):
 def _send_hotkey(combo: str) -> None:
     """Send a key combination like 'ctrl+shift+m'. Best-effort across tools."""
     combo = combo.strip()
-    if not combo or not KEY_TOOL:
-        if not KEY_TOOL:
-            log.warning("no keystroke tool (install xdotool / ydotool / wtype)")
+    if not combo:
+        return
+    if not KEY_TOOL:
+        # No helper tool: ask the compositor to inject the keys for us.
+        # This is the only route inside a Flatpak, and it also rescues a
+        # plain Wayland desktop where ydotool was never set up.
+        from . import portal_input
+        codes = _ydotool_keycodes(combo)
+        if codes and portal_input.send_combo(codes):
+            return
+        log.warning("no keystroke tool (install xdotool / ydotool / wtype) "
+                    "and the RemoteDesktop portal is unavailable")
         return
     if KEY_TOOL == "xdotool":
         _run(["xdotool", "key", "--clearmodifiers", combo],
@@ -365,6 +374,10 @@ def _type_text(text: str) -> None:
     Return, which is what the multi-line editor produces.
     """
     if not KEY_TOOL:
+        from . import portal_input
+        if not portal_input.type_text(text):
+            log.warning("no keystroke tool and the RemoteDesktop portal is "
+                        "unavailable: cannot type")
         return
     data = text.encode()
     if KEY_TOOL == "xdotool":
@@ -391,10 +404,20 @@ def _close_app(target: str) -> None:
 
 
 def _media(cmd: str) -> None:
+    """Control the active player.
+
+    MPRIS over D-Bus first: every modern player speaks it, so this works with
+    no helper installed and inside a sandbox (where there is no host
+    playerctl and reaching the host is the permission Flathub rejects).
+    playerctl stays as the fallback for the rare player that only it knows.
+    """
+    from . import mpris
+    if mpris.control(cmd):
+        return
     if HAS_PLAYERCTL:
         _run(["playerctl", cmd], stderr=subprocess.DEVNULL)
     else:
-        log.warning("media control needs 'playerctl'")
+        log.warning("media control found no MPRIS player (and no playerctl)")
 
 
 SINK = "@DEFAULT_AUDIO_SINK@"

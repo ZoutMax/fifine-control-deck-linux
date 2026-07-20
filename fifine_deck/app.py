@@ -264,6 +264,25 @@ def _portal_autostart(enable: bool) -> bool:
                        responder.handle)
 
 
+def _prime_input_portal() -> None:
+    """Establish the RemoteDesktop portal session when, and only when, it
+    will actually be needed: no xdotool/ydotool/wtype on this system.
+
+    Deliberately conditional. Starting the session shows a consent dialog,
+    and a user whose helper tool already works should never be asked for a
+    permission the app is not going to use. Inside Flatpak there is never a
+    helper tool, so the session is established there."""
+    from .actions import KEY_TOOL
+    if KEY_TOOL:
+        return
+    try:
+        from . import portal_input
+        if portal_input.prime():
+            log.info("keystroke injection ready via the RemoteDesktop portal")
+    except Exception as e:                       # never block startup
+        log.warning("remote desktop portal unavailable: %s", e)
+
+
 def _prime_secret_portal() -> None:
     """Inside Flatpak, fetch the Secret portal's master secret NOW, on the
     main thread. Password keys are dispatched on the controller's action
@@ -361,6 +380,7 @@ def run_gui(quit_flag: bool = False, hidden: bool = False) -> int:
 
     ensure_dirs()
     _prime_secret_portal()
+    _prime_input_portal()
     config = DeckConfig.load()
     controller = DeckController(config)
 
@@ -446,6 +466,7 @@ def run_headless() -> int:
     import time
     ensure_dirs()
     _prime_secret_portal()
+    _prime_input_portal()
     config = DeckConfig.load()
     controller = DeckController(config)
     ok = controller.start()

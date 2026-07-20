@@ -32,12 +32,20 @@ finish-args:
   # The deck is driven over /dev/hidraw (vendor HID protocol); there is no
   # narrower device permission that covers hidraw nodes.
   - --device=all
+  # Media control speaks MPRIS directly to whatever player is running.
+  # This is the standard, routinely-granted permission for media keys, and
+  # it replaces shelling out to a host playerctl.
+  - --talk-name=org.mpris.MediaPlayer2.*
+
   # PORTALS-FIRST: no org.freedesktop.Flatpak and no org.freedesktop.secrets
   # talk-names here, on purpose.
   #  - Secrets ("Type password" action) go through the Secret portal
   #    (org.freedesktop.portal.Secret), which needs no permission.
-  #  - Host helper tools (hotkeys via ydotool/xdotool, playerctl, wpctl,
-  #    launching apps/scripts) DO need host access; that is the user's call,
+  #  - Hotkeys and typed text go through the RemoteDesktop portal: the
+  #    compositor injects the events after a one-time consent, so no host
+  #    tool (ydotool/xdotool) and no host access are needed.
+  #  - Remaining host helpers (launching apps, shell commands) DO need host
+  #    access; that is the user's call,
   #    granted once with:
   #      flatpak override --user --talk-name=org.freedesktop.Flatpak \
   #          io.github.zoutmax.FifineControlDeck

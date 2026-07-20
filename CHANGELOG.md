@@ -4,6 +4,29 @@ All notable changes to **fifine Control Deck** are documented here. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and the project
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] - Unreleased
+Sandbox-native actions. Media and keystrokes no longer depend on host helper
+binaries, which makes the app work in more places, not only in a Flatpak.
+
+### Added
+- **Media control over MPRIS.** The play/pause, next, previous and stop
+  actions now talk directly to whatever player is running (Spotify, VLC,
+  mpv, browsers) on the session bus. `playerctl` is no longer required and
+  stays only as a fallback, so media keys work on a fresh install with
+  nothing extra installed.
+- **Keystroke injection through the RemoteDesktop portal.** When no
+  xdotool/ydotool/wtype is available, hotkeys and typed text are injected by
+  the compositor after a one-time consent. This is the only route inside a
+  sandbox, and it also fixes a plain Wayland desktop where ydotool was never
+  set up (it needs a daemon plus uinput access). A working helper tool is
+  still preferred, so users who have one see no change and no consent
+  prompt.
+
+### Changed
+- The Flatpak manifest asks for `--talk-name=org.mpris.MediaPlayer2.*` (the
+  standard media-control permission) and needs no host access for hotkeys,
+  typing or media.
+
 ## [0.9.0] - 2026-07-20
 Store-readiness release (#6): both technical objections from the Flathub
 review are resolved, in ways that also make the product better outside any

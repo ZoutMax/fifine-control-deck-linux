@@ -172,12 +172,19 @@ def test_type_text_needs_a_tool(ran, monkeypatch):
 # -- media ------------------------------------------------------------------
 
 def test_media_uses_playerctl(ran, monkeypatch):
+    """playerctl is the FALLBACK since 0.10.0: MPRIS on the session bus is
+    tried first (no helper needed, works sandboxed). Here no MPRIS player
+    answers, so the helper must still be used."""
+    from fifine_deck import mpris
+    monkeypatch.setattr(mpris, "control", lambda cmd: False)
     monkeypatch.setattr(actions, "HAS_PLAYERCTL", True)
     actions._media("play-pause")
     assert ran == [["playerctl", "play-pause"]]
 
 
 def test_media_without_playerctl_does_nothing(ran, monkeypatch):
+    from fifine_deck import mpris
+    monkeypatch.setattr(mpris, "control", lambda cmd: False)
     monkeypatch.setattr(actions, "HAS_PLAYERCTL", False)
     actions._media("play-pause")
     assert ran == []

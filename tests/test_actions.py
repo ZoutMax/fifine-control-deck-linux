@@ -97,3 +97,61 @@ def test_granted_host_access_prefixes_spawn(monkeypatch):
     monkeypatch.setattr(actions.subprocess, "run", lambda *a, **k: _R())
     assert actions.host_access_available() is True
     assert actions._host(["true"]) == ["flatpak-spawn", "--host", "true"]
+
+
+# ---------------------------------------------------------------------------
+# 0.10.0: sandbox-native action paths (MPRIS, RemoteDesktop portal)
+# ---------------------------------------------------------------------------
+def test_media_prefers_mpris_over_playerctl(monkeypatch):
+    """MPRIS needs no helper installed and works inside a sandbox, so it is
+    tried first; playerctl only covers what MPRIS could not."""
+    from fifine_deck import mpris
+    monkeypatch.setattr(mpris, "control", lambda cmd: True)
+    monkeypatch.setattr(actions, "_run",
+                        lambda *a, **k: pytest.fail("playerctl must not run"))
+    actions._media("next")
+
+
+def test_media_falls_back_to_playerctl_when_mpris_finds_nothing(monkeypatch):
+    from fifine_deck import mpris
+    ran = []
+    monkeypatch.setattr(mpris, "control", lambda cmd: False)
+    monkeypatch.setattr(actions, "HAS_PLAYERCTL", True)
+    monkeypatch.setattr(actions, "_run", lambda a, **k: ran.append(a))
+    actions._media("next")
+    assert ran == [["playerctl", "next"]]
+
+
+def test_hotkey_uses_the_portal_when_no_helper_tool_exists(monkeypatch):
+    """Inside a Flatpak, and on a Wayland desktop without ydotool set up,
+    the compositor injects the keys instead of a helper binary."""
+    from fifine_deck import portal_input
+    sent = []
+    monkeypatch.setattr(actions, "KEY_TOOL", "")
+    monkeypatch.setattr(portal_input, "send_combo",
+                        lambda codes: (sent.append(codes), True)[1])
+    actions._send_hotkey("ctrl+shift+m")
+    assert sent and sent[0] == actions._ydotool_keycodes("ctrl+shift+m")
+
+
+def test_type_text_uses_the_portal_when_no_helper_tool_exists(monkeypatch):
+    from fifine_deck import portal_input
+    typed = []
+    monkeypatch.setattr(actions, "KEY_TOOL", "")
+    monkeypatch.setattr(portal_input, "type_text",
+                        lambda t: (typed.append(t), True)[1])
+    actions._type_text("hello")
+    assert typed == ["hello"]
+
+
+def test_existing_helper_tool_still_wins(monkeypatch):
+    """A working xdotool must keep being used: it is instant and needs no
+    consent dialog, so users who already have it see no change."""
+    from fifine_deck import portal_input
+    ran = []
+    monkeypatch.setattr(actions, "KEY_TOOL", "xdotool")
+    monkeypatch.setattr(portal_input, "send_combo",
+                        lambda codes: pytest.fail("portal must not be used"))
+    monkeypatch.setattr(actions, "_run", lambda a, **k: ran.append(a))
+    actions._send_hotkey("ctrl+c")
+    assert ran and ran[0][0] == "xdotool"
