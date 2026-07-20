@@ -70,7 +70,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/ZoutMax/FifineControlDeck.git
-        tag: v0.8.1
-        commit: b0fb0141ab8a6a110fc196d28e2f62c3de274e3f
+        tag: v0.9.0
+        commit: 5f41eeedb1aeaae64f6b172200615a70a4112b71
       - type: file
         path: fifine-control-deck.launcher
