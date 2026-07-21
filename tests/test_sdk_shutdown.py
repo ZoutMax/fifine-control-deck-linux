@@ -381,14 +381,17 @@ def test_a_replug_that_reuses_the_path_is_still_detected_as_a_replug(tmp_path):
     node = tmp_path / "hidraw0"
     node.write_text("")                       # stand-in for the device node
     dm = _device_manager_module()
-    before = dm.DeviceManager._node_identity(str(node))
+    current = dm.DeviceManager._node_identity(str(node))
 
-    dev = _FakeDock(str(node), before)
-    # the node is destroyed and recreated, exactly as devtmpfs does on replug
-    node.unlink()
-    node.write_text("")
-    after = dm.DeviceManager._node_identity(str(node))
-    assert before != after, "test setup failed to change the node identity"
+    # The device was created while the node had a DIFFERENT identity — i.e. the
+    # node has since been destroyed and recreated. Stamped directly rather than
+    # by unlink-and-recreate, because an ordinary filesystem may hand back the
+    # SAME inode (CI's did), which silently turned this test into a no-op.
+    #
+    # devtmpfs does allocate a fresh inode for a recreated device node. Measured
+    # across a physical replug of this deck: (7, 12769) -> (7, 14541).
+    stale_identity = (current[0], current[1] + 1)
+    dev = _FakeDock(str(node), stale_identity)
 
     mgr = _manager_with([dev], [str(node)])   # path IS still present
     removed = mgr._remove_missing_devices([])
