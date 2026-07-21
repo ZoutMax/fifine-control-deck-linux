@@ -44,6 +44,11 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.10.1" date="2026-07-21">
+      <description>
+        <p>Fixes two regressions from 0.10.0: a config with no profiles was treated as corrupt and its brightness and other settings reset, and the window failed to open with no visible message when the background service already held the deck.</p>
+      </description>
+    </release>
     <release version="0.10.0" date="2026-07-21">
       <description>
         <p>An idle app no longer burns a CPU core: a redundant USB rescan that

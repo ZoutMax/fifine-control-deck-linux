@@ -153,7 +153,7 @@ def set_autostart(enable: bool, config=None) -> int:
 
 
 def run_gui(quit_flag: bool = False, hidden: bool = False) -> int:
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QMessageBox
     from PyQt6.QtGui import QIcon, QGuiApplication
     from PyQt6.QtNetwork import QLocalServer
     from .gui.main_window import MainWindow
@@ -216,9 +216,23 @@ def run_gui(quit_flag: bool = False, hidden: bool = False) -> int:
         # The lock is held by something that will not answer the socket: either
         # a GUI wedged mid-startup, or a headless instance, which holds the
         # same lock by design and never listens on the socket at all.
-        print("Another fifine Control Deck instance holds the device.\n"
-              "If it is the headless service:  systemctl --user stop fifine-deck",
-              file=sys.stderr)
+        #
+        # SAY it in the UI, not just on stderr. Since headless started taking
+        # this lock, "service enabled AND the user clicks the app icon" is a
+        # normal configuration that lands here — and launched from a .desktop
+        # entry stderr goes to the journal, so the app would appear to do
+        # nothing at all when clicked. QApplication already exists above, so a
+        # message box is available.
+        msg = ("Another fifine Control Deck instance already has the deck.\n\n"
+               "If you enabled the background service, stop it first:\n"
+               "    systemctl --user stop fifine-deck")
+        print(msg, file=sys.stderr)
+        try:
+            QMessageBox.critical(None, "fifine Control Deck", msg)
+        except Exception:
+            # Never let the diagnostic itself be the failure (no display, a
+            # stubbed QMessageBox in tests); stderr above already carried it.
+            log.debug("could not show the single-instance dialog", exc_info=True)
         return 1
 
     # We hold the lock, so any existing socket file is stale by definition

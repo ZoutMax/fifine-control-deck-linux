@@ -101,3 +101,29 @@ class _Boom:
     def load(self, *a, **k):
         self._sink.append("load")
         raise AssertionError("run_headless got past the single-instance lock")
+
+
+def test_gui_blocked_by_another_instance_tells_the_user_in_the_ui(tmp_path, monkeypatch):
+    """Since headless started taking the single-instance lock, "background
+    service enabled AND the user clicks the app icon" lands on this path. From
+    a .desktop entry stderr goes to the journal, so a stderr-only message means
+    the app appears to do nothing at all when clicked."""
+    import fifine_deck.app as fapp
+    monkeypatch.setattr("fifine_deck.model.CONFIG_DIR", str(tmp_path))
+
+    src = _read_source(fapp)
+    # The dialog must come from the branch that gives up, after the hand-off
+    # retries — not from the happy path.
+    give_up = src[src.index("Another fifine Control Deck instance"):]
+    assert "QMessageBox.critical" in give_up[:800], (
+        "the blocked-launch path only prints to stderr; a desktop launch shows nothing")
+    assert "systemctl --user stop fifine-deck" in give_up[:800], (
+        "the message must say how to release the lock")
+    # and it must not be able to become the failure itself
+    assert "except Exception" in give_up[:1200], (
+        "a failing message box would mask the real exit path")
+
+
+def _read_source(mod):
+    import inspect
+    return inspect.getsource(mod)

@@ -4,6 +4,32 @@ All notable changes to **fifine Control Deck** are documented here. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and the project
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.10.1] - 2026-07-21
+
+Fixes two regressions introduced by 0.10.0's own hardening work, found in a
+follow-up audit of that release.
+
+### Fixed
+- **A config with no profiles is no longer treated as corrupt.** 0.10.0 added a
+  structural check so that a file which parses but is not a deck config gets
+  preserved instead of silently replaced. That check was the one backing the
+  *import* dialog, which requires a non-empty profile list — reasonable when
+  the user picks a file by hand, wrong on load, because the loader has always
+  turned an empty list into a working default. The effect was that such a
+  config was moved aside to `config.json.corrupt` and the brightness, glow and
+  dismissed-hint settings alongside it were reset to defaults. The file was
+  preserved, so nothing was destroyed, but the settings were lost. Load now
+  uses its own weaker check that accepts an empty profile list while still
+  requiring the `profiles` key, which is what catches the case the check was
+  added for.
+- **The window no longer fails to open silently when the background service is
+  running.** 0.10.0 made headless mode take the single-instance lock, so the
+  background service and the GUI can no longer both drive the deck. That made
+  "service enabled, then click the app icon" a normal path into the
+  already-running branch, which only wrote to stderr — and a launch from the
+  desktop entry sends stderr to the journal, so clicking the icon appeared to
+  do nothing. It now shows a dialog naming the command that frees the deck.
+
 ## [0.10.0] - 2026-07-21
 
 ### Fixed

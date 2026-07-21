@@ -363,6 +363,32 @@ class DeckConfig:
                 return False
         return True
 
+    @staticmethod
+    def is_loadable_shape(data) -> bool:
+        """Structural check for OUR OWN config on load. Deliberately weaker than
+        looks_like_config: that one backs the import dialog, where an empty
+        profile list means the user picked a useless file and should be told.
+
+        Here an empty list is legitimate — from_dict's `or [Profile()]` fallback
+        has always turned it into a working default while KEEPING the user's
+        brightness, glow and other top-level settings. Rejecting it would move a
+        perfectly loadable config to .corrupt and reset those settings.
+
+        The `profiles` KEY must still be present: its absence is what
+        distinguishes a mistyped top-level key ("Profiles") or some other
+        application's JSON from a real config, which is the whole point of
+        gating load() on a shape check.
+        """
+        if not isinstance(data, dict) or "profiles" not in data:
+            return False
+        profiles = data["profiles"]
+        if not isinstance(profiles, list):
+            return False
+        for p in profiles:
+            if not isinstance(p, dict) or not isinstance(p.get("pages"), list):
+                return False
+        return True
+
     @classmethod
     def load(cls, path: Optional[str] = None) -> "DeckConfig":
         path = path or CONFIG_PATH          # resolved at call time; see save()
@@ -389,7 +415,7 @@ class DeckConfig:
             # the first autosave 600 ms later overwrote the user's only copy.
             # Gate on the structural check so those take the preserve-and-restart
             # path instead.
-            if not cls.looks_like_config(data):
+            if not cls.is_loadable_shape(data):
                 raise ValueError("not a deck config")
             # A config written by a NEWER build: from_dict keeps only the keys
             # this build knows, and save() then writes the stripped result back

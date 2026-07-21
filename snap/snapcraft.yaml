@@ -1,6 +1,6 @@
 name: fifine-control-deck
 base: core24
-version: '0.10.0'
+version: '0.10.1'
 icon: snap/gui/fifine-control-deck.png
 title: fifine Control Deck
 license: MIT

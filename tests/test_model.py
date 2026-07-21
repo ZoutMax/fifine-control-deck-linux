@@ -341,3 +341,55 @@ def test_a_same_version_config_is_not_backed_up(tmp_path):
     assert not (tmp_path / f"config.json.v{CONFIG_VERSION}").exists()
     # no sibling copy of any kind (save() also makes a cfg/ dir; ignore that)
     assert [f.name for f in tmp_path.glob("config.json.*")] == []
+
+
+def test_an_empty_profile_list_loads_and_keeps_the_other_settings(tmp_path):
+    """The 0.10.0 shape gate reused looks_like_config, which requires a NON-EMPTY
+    profile list because it backs the import dialog. That made an empty list
+    look corrupt on load, even though from_dict's `or [Profile()]` fallback has
+    always handled it — so the config was moved aside and the user's brightness,
+    glow and dismissed-hint settings were reset to defaults."""
+    import json
+    from fifine_deck.model import DeckConfig
+    p = tmp_path / "config.json"
+    p.write_text(json.dumps({"version": 1, "brightness": 42, "glow": False,
+                             "snap_hint_dismissed": True, "profiles": []}))
+
+    cfg = DeckConfig.load(str(p))
+
+    assert not (tmp_path / "config.json.corrupt").exists(), "loadable config declared corrupt"
+    assert cfg.brightness == 42                  # the settings that were being lost
+    assert cfg.glow is False
+    assert cfg.snap_hint_dismissed is True
+    assert [x.name for x in cfg.profiles] == ["Default"]   # fallback still applies
+
+
+def test_the_shape_gate_still_rejects_what_it_was_added_for(tmp_path):
+    """Loosening the gate must not reopen the hole it closed: a mistyped
+    top-level key, a foreign JSON document, and a top-level list must all still
+    be preserved rather than silently replaced."""
+    import json
+    from fifine_deck.model import DeckConfig
+    cases = {
+        "typo": {"Profiles": [{"name": "mine", "pages": [{"keys": {}}]}], "brightness": 42},
+        "foreign": {"window": {"w": 800}, "theme": "dark"},
+        "listy": [1, 2, 3],
+        "no_profiles_key": {"version": 1, "brightness": 42},
+    }
+    for name, data in cases.items():
+        d = tmp_path / name
+        d.mkdir()
+        p = d / "config.json"
+        p.write_text(json.dumps(data))
+        DeckConfig.load(str(p))
+        assert (d / "config.json.corrupt").exists(), f"{name}: was not preserved"
+
+
+def test_is_loadable_shape_is_weaker_than_looks_like_config():
+    """The two checks are deliberately different; keep them from being merged.
+    Import must reject an empty profile list (the user picked a useless file);
+    load must accept it."""
+    from fifine_deck.model import DeckConfig
+    empty = {"profiles": []}
+    assert DeckConfig.is_loadable_shape(empty) is True
+    assert DeckConfig.looks_like_config(empty) is False
