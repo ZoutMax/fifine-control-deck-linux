@@ -86,6 +86,13 @@ class StreamDock(ABC):
         # Heartbeat thread for keeping device alive
         self.heartbeat_thread = None
         self.run_heartbeat_thread = False
+        # Interruptible sleep for the heartbeat. The worker used to time.sleep(10)
+        # between beats, so clearing run_heartbeat_thread went unnoticed for up to
+        # ten seconds and every join(timeout=2.0) below therefore timed out: a
+        # guaranteed 2 s freeze on the Qt thread for every quit, and 2 s of the
+        # udev listener blocked on every unplug. Waiting on an Event instead lets
+        # close() wake the worker immediately.
+        self._heartbeat_stop = threading.Event()
         self._notify_on_close = True
         self.support_single_led_color = False
 
@@ -121,6 +128,7 @@ class StreamDock(ABC):
         try:
             # Stop the heartbeat thread (safe operation)
             self.run_heartbeat_thread = False
+            self._heartbeat_stop.set()   # or the 0.5 s join below always times out
             if self.heartbeat_thread and self.heartbeat_thread.is_alive():
                 self.heartbeat_thread.join(timeout=0.5)  # Short timeout during __del__
         except (TransportError, ValueError, RuntimeError):
@@ -219,21 +227,32 @@ class StreamDock(ABC):
         if not notify:
             self._notify_on_close = False
 
+        # The GIF worker writes to the transport outside every lock, so whether
+        # it actually stopped decides whether the transport may be destroyed
+        # below. A timeout here means it is still inside a native write.
+        gif_thread_alive = False
         try:
-            self.gif_controller.close()
+            gif_thread_alive = not self.gif_controller.close()
         except Exception as e:
             print(f"[WARNING] Error while stopping GIF controller: {e}", flush=True)
+            gif_thread_alive = True     # unknown state: assume the worst
 
         # CRITICAL: Stop heartbeat thread first
         self.run_heartbeat_thread = False
+        self._heartbeat_stop.set()      # wake it out of its 10 s wait right now
+        heartbeat_thread_alive = False
         if self.heartbeat_thread and self.heartbeat_thread.is_alive():
             try:
                 self.heartbeat_thread.join(timeout=2.0)
+                heartbeat_thread_alive = self.heartbeat_thread.is_alive()
+                if heartbeat_thread_alive:
+                    print("[WARNING] Heartbeat thread did not exit in time", flush=True)
             except Exception as e:
                 print(
                     f"[WARNING] Error while waiting for heartbeat thread to exit: {e}",
                     flush=True,
                 )
+                heartbeat_thread_alive = True
 
         # CRITICAL: Stop reader thread first and wait for it to finish
         self.run_read_thread = False
@@ -262,10 +281,28 @@ class StreamDock(ABC):
             except Exception as e:
                 print(f"[WARNING] Error sending disconnect command: {e}", flush=True)
 
-        # CRITICAL: Close transport properly to release HID device
-        if read_thread_alive:
+        # CRITICAL: Close transport properly to release HID device.
+        #
+        # Every thread that can still be inside a native call on this handle has
+        # to be accounted for, not just the reader. transport.close() calls
+        # transport_destroy, and each transport method is an unsynchronised
+        # check-then-use of self._handle — so destroying it while ANY of these is
+        # mid-call is a use-after-free in C. Deferring leaks one handle and its
+        # threads for the process lifetime; not deferring can take the whole
+        # process down. Leak, and say so.
+        busy = [
+            name
+            for name, alive in (
+                ("read", read_thread_alive),
+                ("GIF worker", gif_thread_alive),
+                ("heartbeat", heartbeat_thread_alive),
+            )
+            if alive
+        ]
+        if busy:
             print(
-                "[WARNING] Transport close deferred because read thread is still active",
+                "[WARNING] Transport close deferred because these threads are "
+                f"still active: {', '.join(busy)}",
                 flush=True,
             )
         else:
@@ -593,8 +630,12 @@ class StreamDock(ABC):
         Worker method that sends heartbeat packets to the device every 10 seconds.
         This keeps the device connection alive and prevents timeout.
         """
-        # Initial delay to allow device and read thread to stabilize
-        time.sleep(1.0)
+        # Initial delay to allow device and read thread to stabilize. Both waits
+        # here are on the stop Event rather than time.sleep, so close() is acted
+        # on the moment it is requested instead of up to 10 s later. wait()
+        # returns True when the event is set, which is the signal to stop.
+        if self._heartbeat_stop.wait(1.0):
+            return
         try:
             while self.run_heartbeat_thread:
                 try:
@@ -602,8 +643,9 @@ class StreamDock(ABC):
                 except Exception as e:
                     # Log but don't crash the thread on heartbeat errors
                     print(f"Heartbeat error: {e}", flush=True)
-                # Wait 10 seconds before next heartbeat
-                time.sleep(10)
+                # Wait 10 seconds before next heartbeat, or wake early on close
+                if self._heartbeat_stop.wait(10):
+                    break
         except Exception as outer_error:
             print(
                 f"[FATAL] Heartbeat thread outer exception: {outer_error}", flush=True
@@ -640,11 +682,16 @@ class StreamDock(ABC):
         """
         if self.heartbeat_thread is not None:
             self.run_heartbeat_thread = False
+            self._heartbeat_stop.set()
             try:
-                self.heartbeat_thread.join()
+                # Bounded: an unbounded join here would hang the caller forever
+                # if the old worker were wedged in a native call. With the stop
+                # Event it returns immediately in the normal case.
+                self.heartbeat_thread.join(timeout=2.0)
             except RuntimeError:
                 pass
 
+        self._heartbeat_stop.clear()
         self.run_heartbeat_thread = True
         self.heartbeat_thread = threading.Thread(target=self._heartbeat_worker)
         self.heartbeat_thread.daemon = True

@@ -4,6 +4,26 @@ All notable changes to **fifine Control Deck** are documented here. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and the project
 follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Pulling the cable while an animated key is playing can no longer kill the
+  app.** The animation worker writes straight to the device outside every lock,
+  and shutdown freed the USB handle once the reader thread had stopped — without
+  checking whether that worker had. A worker still inside a native write then had
+  its handle freed underneath it, which is a use-after-free in C: the process
+  dies instead of disconnecting cleanly. Shutdown now confirms every thread that
+  can touch the handle has actually stopped, and holds the handle back if one
+  has not.
+- **Quitting is no longer stuck behind the heartbeat.** The keep-alive worker
+  slept in ten-second blocks, so it never noticed the request to stop and every
+  shutdown waited out a two-second timeout on the UI thread — the same two
+  seconds also blocked the hotplug listener on every unplug. It now wakes
+  immediately. Measured on hardware, that join went from a guaranteed 2.00s to
+  0.00s, and `fifine-control-deck --quit` went from exceeding its ten-second
+  deadline and reporting failure to finishing in 6.3s and reporting success.
+  Roughly two seconds of shutdown remain, elsewhere; see `docs/KNOWN-ISSUES.md`.
+
 ## [0.10.1] - 2026-07-21
 
 Fixes two regressions introduced by 0.10.0's own hardening work, found in a

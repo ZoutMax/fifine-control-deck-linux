@@ -229,16 +229,34 @@ class GifController:
     def animation_loop_status(self):
         return self._loop_enabled
 
-    def close(self):
+    def close(self, timeout=2.0):
+        """Stop the animation worker.
+
+        Returns True once the worker has actually exited, False when the join
+        timed out and it is still running. The caller MUST honour a False: this
+        worker writes straight to the device transport outside every lock (see
+        the tail of _gif_work_loop), so destroying the transport while it is
+        still in there frees the handle underneath a live native write — a
+        use-after-free in C, which kills the process instead of disconnecting
+        cleanly. This return value used to not exist, and StreamDock.close()
+        went on to free the transport regardless.
+        """
         self._running = False
         self._loop_enabled = False
         self._wake_event.set()
         if self._thread.is_alive():
-            self._thread.join(timeout=2.0)
+            self._thread.join(timeout=timeout)
+            if self._thread.is_alive():
+                # Still inside a native write; libusb blocks until its transfer
+                # times out. Leave _gif_map alone — _release_status frees buffers
+                # the worker may still be reading from.
+                print("[WARNING] GIF worker did not exit in time", flush=True)
+                return False
         with self._lock:
             for status in self._gif_map.values():
                 self._release_status(status)
             self._gif_map.clear()
+        return True
 
     def _get_key_values(self, key):
         try:

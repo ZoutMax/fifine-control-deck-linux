@@ -14,7 +14,9 @@ long-standing behaviours that predate both.
 
 ## Device layer and the vendored SDK
 
-The eight items below live in or around `fifine_deck/backend/StreamDock/`, which
+**Status:** issues 2 and 3 are fixed and verified on hardware. The rest are open.
+
+The items below live in or around `fifine_deck/backend/StreamDock/`, which
 is the vendored MiraboxSpace SDK — code we ship but did not write. Fixing them
 means patching a third party's threading, so each one needs real replug-cycle
 and quit-timing testing against physical hardware before it can be trusted. That
@@ -39,7 +41,18 @@ more than a second.
 
 Reachable from a wobbly USB-C connector or a hub that re-enumerates.
 
-### 2. `transport_destroy` can free a handle while the GIF worker is writing through it
+### 2. `transport_destroy` can free a handle while the GIF worker is writing through it — **FIXED**
+
+> Fixed after 0.10.1. `GifController.close()` now returns whether its worker
+> actually exited, and `StreamDock.close()` defers `transport.close()` unless
+> **every** thread that can be inside a native call on the handle — reader, GIF
+> worker and heartbeat — has stopped. Deferring leaks one handle and its threads
+> for the process lifetime, which is strictly better than a use-after-free that
+> kills the process, and it now says which threads held it back.
+> Covered by `tests/test_sdk_shutdown.py`.
+
+The original problem, for reference:
+
 
 `StreamDock.py:266-275`, `GifController.py:236-237`, `GifController.py:473-481`,
 `LibUSBHIDAPI.py:1231-1240`, `LibUSBHIDAPI.py:628-633`
@@ -57,7 +70,24 @@ use-after-free in C, so the process dies instead of disconnecting cleanly.
 **This is the one to fix first.** It is the only item here that can take the
 whole process down.
 
-### 3. Every quit blocks ~2 s in the heartbeat join
+### 3. Every quit blocks ~2 s in the heartbeat join — **FIXED**
+
+> Fixed after 0.10.1. The worker now waits on a `threading.Event` instead of
+> `time.sleep`, so a stop request wakes it at once; `close()` sets that event,
+> checks the join result, and treats a still-live heartbeat as a reason to defer
+> the transport destroy (see issue 2). The unbounded `join()` when restarting the
+> heartbeat is bounded too.
+>
+> Measured on real hardware, phase by phase, after the fix:
+> `gif_controller.close()` 0.00 s, **heartbeat join 0.00 s (was a guaranteed
+> 2.0 s)**, read thread join 0.09 s. End to end, `--quit` went from exceeding its
+> 10 s deadline and reporting failure, to 6.34 s and reporting success.
+>
+> **~2 s of the remaining shutdown is elsewhere** — see issue 9 below, which the
+> same measurement turned up.
+
+The original problem, for reference:
+
 
 `StreamDock.py:599-606`, `StreamDock.py:228-236`, `controller.py:248`,
 `main_window.py:876`, `LibUSBHIDAPI.py:886-890`
@@ -160,6 +190,32 @@ amount.
   `TransportResult` that `set_key_image_pil` passes back and `render_key`
   discards. Nothing distinguishes "written" from "swallowed by a dead handle",
   which is what makes issues 1 and 6 invisible to the user.
+
+### 9. ~2 s of every shutdown is spent inside `controller.stop()`
+
+`controller.py` (`stop()`), and what it calls: `stop_gif_loop()`, `clearAllIcon()`
+
+Found by profiling the fix for issue 3, so unlike the rest of this file it is a
+**measurement, not a reading**. With the SDK's thread joins now effectively free,
+the phase breakdown of a real shutdown on hardware is:
+
+| phase | time |
+|---|---|
+| `gif_controller.close()` | 0.00 s |
+| heartbeat join | 0.00 s |
+| read thread join | 0.09 s |
+| **rest of `controller.stop()`** | **2.05 s** |
+
+That 2 s is the dominant remaining cost, and it runs on the Qt thread from
+`MainWindow._quit`, so it is a visible freeze on every quit. The likely candidate
+is `clearAllIcon()` writing all 15 key images over USB one at a time, plus the
+monitor sampler shutdown, but that has **not** been confirmed — the profile
+above only narrows it to "inside `stop()`". Profile it further before changing
+anything.
+
+Worth noting that the end-to-end `--quit` figure (6.34 s) is larger than the sum
+here, so the IPC round trip and Qt teardown carry cost of their own that has not
+been attributed yet.
 
 ---
 
