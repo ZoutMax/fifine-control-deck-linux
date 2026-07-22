@@ -5,8 +5,6 @@ import json
 import logging
 import os
 
-log = logging.getLogger(__name__)
-
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QTimer
 from PyQt6.QtGui import QAction, QIcon, QPixmap
 from PyQt6.QtWidgets import (
@@ -22,6 +20,8 @@ from ..actions import default_icon_for
 from ..controller import DeckController
 from .widgets import (KeyButton, ActionEditor, ActionCatalog, KnobEditor,
                       ReorderDialog, _NoWheelWhenUnfocused, _protect_wheel)
+
+log = logging.getLogger(__name__)
 
 
 class _Bridge(QObject):

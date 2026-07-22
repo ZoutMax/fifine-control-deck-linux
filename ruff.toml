@@ -9,3 +9,19 @@ ignore = [
   "E501",  # line length: advisory only
   "E741",  # ambiguous variable names (l/I/O) used in a couple of loops
 ]
+
+# Deliberate, file-local exceptions. The point is to keep the advisory pass at
+# ZERO: it sat at a permanent "Found 35 errors", and a standing count that never
+# moves is a count nobody reads — a genuinely new finding would have hidden in
+# it. Each entry below is a considered decision, not a backlog.
+[lint.per-file-ignores]
+# The vendored SDK is imported as a top-level `StreamDock` package, so this
+# module MUST extend sys.path before importing from it. Hoisting those imports
+# to the top of the file, which is what E402 asks for, would break the app.
+"fifine_deck/device.py" = ["E402"]
+# Paired Qt widget setup is written one pair per line here, e.g.
+#   self.bg_btn = ColorButton(...); self.fg_btn = ColorButton(...)
+# which keeps the two halves of one thing together and reads better than four
+# lines. A consistent local idiom used ~20 times; reformatting working GUI code
+# to satisfy a style rule is churn with no benefit.
+"fifine_deck/gui/widgets.py" = ["E702"]
