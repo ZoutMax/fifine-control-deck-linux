@@ -155,16 +155,34 @@ class MainWindow(QMainWindow):
         actions and multi-action steps, because a secret in any one of them ends
         up in the exported file just the same.
         """
+        def step_has(step) -> bool:
+            """A multi-action step, which is NOT a bare action dict.
+
+            _StepRow.value() writes {"action": {...}, "delay": N}, and the
+            executor reads it back as step.get("action", step) — see the "multi"
+            branch of actions.execute. Reading step["params"] directly, as this
+            did first, looks one level too shallow and therefore never saw a
+            password nested in a Multi-action: the export warning silently did
+            not fire for exactly the case it was written for. Mirror the
+            executor's unwrapping so the two cannot drift apart.
+            """
+            if not isinstance(step, dict):
+                return False
+            inner = step.get("action", step)
+            if not isinstance(inner, dict):
+                return False
+            params = inner.get("params") or {}
+            if params.get("password"):
+                return True
+            # a step may itself be a multi-action
+            return any(step_has(s) for s in (params.get("steps") or []))
+
         def action_has(a) -> bool:
             if a is None:
                 return False
             if a.params.get("password"):
                 return True
-            for step in a.params.get("steps") or []:
-                # steps are stored as plain dicts of {"type": ..., "params": ...}
-                if isinstance(step, dict) and (step.get("params") or {}).get("password"):
-                    return True
-            return False
+            return any(step_has(s) for s in (a.params.get("steps") or []))
 
         def scan_container(cont) -> bool:
             for page in getattr(cont, "pages", []):

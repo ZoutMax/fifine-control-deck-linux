@@ -675,6 +675,10 @@ def _controller_with_gif_ctl(ctl):
     dev = MockDevice()
     dev.gif_controller = ctl
     c.device = dev
+    # DeckController.__init__ leaves _running False; only start() sets it. The
+    # worker's "did we actually attempt this" test reads it, so without this a
+    # test asserting "not blacklisted" would pass for the WRONG reason.
+    c._running = True
     return c, dev
 
 
@@ -776,3 +780,57 @@ def test_a_full_page_of_animations_does_not_evict_itself(tmp_path):
         ctl._read_gif(p, FMT, True)
 
     assert decodes == [], f"{len(decodes)} of {keys} keys re-decoded on the second pass"
+
+
+def test_a_decode_skipped_because_the_device_vanished_is_not_blacklisted(tmp_path):
+    """0.11.1 audit: _decode_worker blacklisted a key whenever ok was False —
+    including when it never ATTEMPTED the decode because the device had been
+    unplugged mid-drain or the app was shutting down. _decode_failed is never
+    cleared, so a perfectly good file was marked broken for the rest of the
+    process: after a replug that key fell back to decoding inline on the Qt
+    thread, reinstating the ~244 ms stall the worker exists to remove."""
+    ctl = _FakeGifCtl(cached=False)
+    c, dev = _controller_with_gif_ctl(ctl)
+    path = str(tmp_path / "a.gif")
+
+    c._gif_decode_ready(dev, 3, path)          # queued
+    item = c._decode_queue.get_nowait()
+    c.device = None                            # unplugged before the worker ran
+
+    # exactly what the worker does for that item
+    key = (os.path.abspath(item[1]), item[0])
+    attempted = c.device is not None and c._running
+    with c._decode_lock:
+        c._decode_pending.discard(key)
+        if attempted:
+            c._decode_failed.add(key)
+
+    assert key not in c._decode_failed, "a transient skip was recorded as permanent"
+    assert ctl.warm_calls == 0, "test setup wrong: the decode should not have run"
+
+    # and with the device back, the file is queued again rather than decoded inline
+    c.device = dev
+    assert c._gif_decode_ready(dev, 3, path) is False
+    assert c._decode_queue.qsize() == 1
+
+
+def test_a_genuinely_undecodable_file_is_still_blacklisted(tmp_path):
+    """The other half: a real decode failure must still be remembered, or it
+    gets re-queued on every render forever."""
+    ctl = _FakeGifCtl(cached=False, decodes_ok=False)
+    c, dev = _controller_with_gif_ctl(ctl)
+    path = str(tmp_path / "bad.gif")
+
+    c._gif_decode_ready(dev, 3, path)
+    index, p = c._decode_queue.get_nowait()
+    key = (os.path.abspath(p), index)
+    attempted = False
+    if c.device is not None and c._running:
+        attempted = True
+        ok = dev.gif_controller.warm_key_gif(p, index)
+    with c._decode_lock:
+        c._decode_pending.discard(key)
+        if attempted and not ok:
+            c._decode_failed.add(key)
+
+    assert key in c._decode_failed, "a real failure was forgotten and will re-queue forever"

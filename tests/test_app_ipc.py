@@ -45,11 +45,19 @@ def test_instance_lock_is_exclusive_and_releases(tmp_path, monkeypatch):
     assert mode == 0o600
 
 
-def test_autostart_cli_delegates_to_running_instance(monkeypatch):
+def test_autostart_cli_delegates_to_running_instance(monkeypatch, tmp_path):
     """0.8.1 audit: --enable/--disable-autostart while the GUI runs got
     clobbered by the GUI's next debounced autosave (its in-memory config
     still held the old value)
     The CLI must hand the request to the running instance instead."""
+    # Point the entry at tmp_path. Without this the test stats the REAL
+    # ~/.config/autostart entry: since 0.11.x main() confirms the delegation by
+    # watching that file, so on a machine where the user actually has autostart
+    # enabled --disable-autostart can never confirm and this test fails. It was
+    # green only under a scrubbed HOME (CI) or XDG_CONFIG_HOME — i.e. red for a
+    # developer running plain `pytest`.
+    entry = tmp_path / "autostart" / "fifine-control-deck.desktop"
+    monkeypatch.setattr(app, "autostart_file", lambda: str(entry))
     sent = []
     monkeypatch.setattr(app, "_signal_existing",
                         lambda cmd: (sent.append(cmd), True)[1])
@@ -127,3 +135,23 @@ def test_gui_blocked_by_another_instance_tells_the_user_in_the_ui(tmp_path, monk
 def _read_source(mod):
     import inspect
     return inspect.getsource(mod)
+
+
+def test_autostart_cli_reports_failure_when_the_change_never_lands(monkeypatch, tmp_path):
+    """The confirmation loop added in 0.11.x had NO coverage: every existing
+    test hit the success path on iteration 0, so the timeout branch — the whole
+    reason the loop exists — was never executed by anything.
+
+    Here the running instance accepts the request and does nothing, which is
+    exactly the case the loop was written for: reporting success on send was
+    the bug it replaced."""
+    import sys
+    entry = tmp_path / "autostart" / "fifine-control-deck.desktop"
+    monkeypatch.setattr(app, "autostart_file", lambda: str(entry))
+    monkeypatch.setattr(app, "_signal_existing", lambda cmd: True)   # accepted...
+    monkeypatch.setattr(app, "set_autostart",
+                        lambda *a, **k: pytest.fail("must not fall back to local"))
+    monkeypatch.setattr(sys, "argv", ["fifine-control-deck", "--enable-autostart"])
+
+    assert app.main() == 1, "reported success for a delegation that changed nothing"
+    assert not entry.exists()

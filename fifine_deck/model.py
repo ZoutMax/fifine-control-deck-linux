@@ -451,7 +451,16 @@ class DeckConfig:
             try:
                 os.replace(path, path + ".corrupt")
             except OSError:
-                pass
+                log.warning("config at %s could not be read and could not be "
+                            "moved aside either; starting from defaults", path)
+            else:
+                # SAY it. This renames the user's configuration and hands them a
+                # blank one — from their side every profile, page and key just
+                # vanished. Doing that silently is indistinguishable from the
+                # data-loss bug this recovery exists to prevent, and leaves them
+                # no idea their old settings are sitting right next to it.
+                log.warning("config at %s could not be read; it has been kept as "
+                            "%s.corrupt and replaced with defaults", path, path)
             cfg = cls()
             cfg.save(path)
             return cfg

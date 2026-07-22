@@ -393,3 +393,32 @@ def test_is_loadable_shape_is_weaker_than_looks_like_config():
     empty = {"profiles": []}
     assert DeckConfig.is_loadable_shape(empty) is True
     assert DeckConfig.looks_like_config(empty) is False
+
+
+def test_corrupt_config_recovery_says_so(tmp_path, caplog):
+    """0.11.1 audit: the recovery renames the user's config and hands them a
+    blank one, silently. From the user's side every profile, page and key just
+    vanished — indistinguishable from the data-loss bug the recovery exists to
+    prevent, with no hint that their settings are sitting right next to it."""
+    import logging
+    from fifine_deck.model import DeckConfig
+    p = tmp_path / "config.json"
+    p.write_text("{ not valid json")
+
+    with caplog.at_level(logging.WARNING, logger="fifine_deck.model"):
+        DeckConfig.load(str(p))
+
+    assert (tmp_path / "config.json.corrupt").exists()
+    msgs = " ".join(r.getMessage() for r in caplog.records)
+    assert ".corrupt" in msgs, "the user is never told where their config went"
+
+
+def test_a_good_config_load_is_quiet(tmp_path, caplog):
+    """No crying wolf: a normal load must log nothing at warning level."""
+    import logging
+    from fifine_deck.model import DeckConfig
+    p = tmp_path / "config.json"
+    DeckConfig().save(str(p))
+    with caplog.at_level(logging.WARNING, logger="fifine_deck.model"):
+        DeckConfig.load(str(p))
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []

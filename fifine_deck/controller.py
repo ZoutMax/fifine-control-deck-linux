@@ -496,19 +496,28 @@ class DeckController:
             index, path = item
             key = (os.path.abspath(path), index)
             ok = False
+            attempted = False
             try:
                 dev = self.device
                 if dev is not None and self._running:
+                    attempted = True
                     ok = dev.gif_controller.warm_key_gif(path, index)
             except Exception as e:
+                attempted = True       # it ran and genuinely failed
                 log.debug("background gif decode of %r failed: %s", path, e)
             finally:
                 with self._decode_lock:
                     self._decode_pending.discard(key)
-                    if not ok:
-                        # Remember the failure, or render_key would queue this
-                        # file again on every single render, forever.
+                    if attempted and not ok:
+                        # Remember a REAL failure — an undecodable file — or
+                        # render_key would queue it again on every render.
                         self._decode_failed.add(key)
+                    # Not attempted (device unplugged mid-drain, or shutting
+                    # down) is transient and must NOT be blacklisted. Doing so
+                    # marked a perfectly good file as broken for the rest of the
+                    # process, so after a replug that key fell back to decoding
+                    # inline on the Qt thread — reinstating the exact ~244 ms
+                    # stall this worker exists to remove, with nothing logged.
             if ok and self._running:
                 try:
                     self.render_key(index)   # now a cache hit, ~0 ms

@@ -1382,9 +1382,23 @@ def test_cleartext_scan_reaches_folders_hold_actions_and_knobs(win):
     assert w._config_has_cleartext_password(), "knob missed"
     page.knobs.clear()
 
+    # The shape the app ACTUALLY writes: _StepRow.value() produces
+    # {"action": {...}, "delay": N}, and actions.execute reads it back as
+    # step.get("action", step). The first version of this test invented a bare
+    # {"type":..., "params":...} step, which matched the buggy scan and
+    # certified the broken path — the export warning did not fire for a real
+    # multi-action password.
     page.key(4).action = Action("multi", {"steps": [
-        {"type": "password", "params": {"password": "x"}}]})
+        {"action": {"type": "password", "params": {"password": "x"}}, "delay": 0}]})
     assert w._config_has_cleartext_password(), "multi-action step missed"
+    page.key(4).action = Action()
+
+    # nested one level deeper, since a step may itself be a multi-action
+    page.key(5).action = Action("multi", {"steps": [
+        {"action": {"type": "multi", "params": {"steps": [
+            {"action": {"type": "password", "params": {"password": "x"}}, "delay": 0}]}},
+         "delay": 0}]})
+    assert w._config_has_cleartext_password(), "nested multi-action step missed"
 
 
 def test_delegated_autostart_applies_even_when_the_menu_state_is_stale(win, tmp_path, monkeypatch):
