@@ -6,6 +6,18 @@
 # and add the staged libraries to the loader path ourselves. Arch-agnostic.
 set -e
 
+# Stash the host's own values BEFORE overwriting them below. A key that
+# launches an app must hand that app the environment it would have had from a
+# terminal, not ours: a host python3 inheriting our PYTHONHOME dies looking for
+# its stdlib in $SNAP/usr — the same failure this file's PYTHONHOME comment
+# describes for our own interpreter. actions.child_env() restores these for
+# every program we exec. Only variables the host actually set are stashed, so
+# "unset" survives the round trip as unset rather than as empty.
+for _v in PYTHONHOME PYTHONPATH PYTHONDONTWRITEBYTECODE LD_LIBRARY_PATH LD_PRELOAD QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH; do
+    if [ -n "${!_v+x}" ]; then export "FIFINE_HOST_${_v}=${!_v}"; fi
+done
+unset _v
+
 # Bundled Python site-packages (core24 -> python3.12; glob to be version-proof).
 SITE="$(ls -d "$SNAP"/lib/python3*/site-packages 2>/dev/null | head -n1)"
 QT6="$SITE/PyQt6/Qt6"

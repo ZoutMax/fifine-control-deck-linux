@@ -7,6 +7,9 @@ exception here would kill the reader thread and silently deaden the deck.
 """
 from __future__ import annotations
 
+import sys
+import time
+
 import pytest
 
 from fifine_deck import actions
@@ -261,3 +264,103 @@ def test_multi_bad_step_does_not_abort_remaining_steps(rec, monkeypatch):
     actions.execute(Action("multi", {"steps": steps}))
     ran = [c[1][0] for c in rec if c[0] == "_popen_detached"]
     assert ran == ["one", "two", "three"]
+
+
+# -- bundle environment hygiene ---------------------------------------------
+#
+# Everything this app execs is a HOST program: the user's apps and the helpers
+# (wpctl, playerctl, xdotool, xdg-open). The AppImage and classic-snap
+# launchers export PYTHONHOME/LD_LIBRARY_PATH/QT_PLUGIN_PATH so OUR interpreter
+# and Qt resolve inside the bundle, and a child inheriting those breaks: a host
+# python3 given our PYTHONHOME dies with "No module named 'encodings'" before
+# running a line.
+
+def test_child_env_drops_our_bundle_vars(monkeypatch):
+    monkeypatch.setenv("APPDIR", "/bundle")             # set by AppRun
+    monkeypatch.setenv("PYTHONHOME", "/bundle/opt/python3.12")
+    monkeypatch.setenv("QT_PLUGIN_PATH", "/bundle/qt/plugins")
+    env = actions.child_env()
+    assert "PYTHONHOME" not in env
+    assert "QT_PLUGIN_PATH" not in env
+
+
+def test_child_env_restores_the_hosts_own_value(monkeypatch):
+    """A stashed FIFINE_HOST_* wins over ours: the child gets what it would
+    have had from a terminal, not an empty variable."""
+    monkeypatch.setenv("APPDIR", "/bundle")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/bundle/qt/lib:/host/lib")
+    monkeypatch.setenv("FIFINE_HOST_LD_LIBRARY_PATH", "/host/lib")
+    env = actions.child_env()
+    assert env["LD_LIBRARY_PATH"] == "/host/lib"
+    # the stash itself must not travel onward, or a nested launch re-applies it
+    assert not [k for k in env if k.startswith("FIFINE_HOST_")]
+
+
+def test_child_env_is_a_passthrough_outside_a_bundle(monkeypatch):
+    """.deb, PPA and source installs must be completely unaffected."""
+    monkeypatch.delenv("APPDIR", raising=False)
+    monkeypatch.delenv("SNAP", raising=False)
+    monkeypatch.setenv("PYTHONPATH", "/home/user/mylibs")
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/whatever/lib")
+    env = actions.child_env()
+    assert env["PYTHONPATH"] == "/home/user/mylibs"
+    assert env["LD_LIBRARY_PATH"] == "/opt/whatever/lib"
+
+
+def test_launched_programs_get_the_de_bundled_env(monkeypatch, tmp_path):
+    """End to end through the real launch path: the child must actually run.
+
+    Without the fix this child never executes a statement — the interpreter
+    aborts during startup — so the output file stays empty.
+    """
+    monkeypatch.setenv("APPDIR", "/bundle")
+    monkeypatch.setenv("PYTHONHOME", "/nonexistent/bundle/python3.12")
+    out = tmp_path / "out"
+    actions.execute(Action("run_command", {
+        "command": f"{sys.executable} -c 'print(\"ran\")' > {out} 2>&1"}))
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not (out.exists() and out.read_text()):
+        time.sleep(0.05)
+    assert out.read_text().strip() == "ran"
+
+
+# -- parameter clamping ------------------------------------------------------
+
+def test_brightness_set_zero_is_not_the_default():
+    """`or "10"` turned a JSON numeric 0 into 10, because 0 is falsy."""
+    ctx = Ctx()
+    actions.execute(Action("brightness", {"mode": "set", "value": 0}), ctx)
+    assert ctx.calls == [("set_brightness", 0)]
+
+
+def test_brightness_blank_value_still_defaults():
+    ctx = Ctx()
+    actions.execute(Action("brightness", {"mode": "set", "value": ""}), ctx)
+    assert ctx.calls == [("set_brightness", 10)]
+
+
+def test_multi_delay_is_clamped(monkeypatch):
+    """An out-of-range delay must clamp, not raise.
+
+    time.sleep(1e300) raises OverflowError, which escaped to execute()'s outer
+    guard and dropped every remaining step of the multi.
+    """
+    slept, ran = [], []
+    monkeypatch.setattr(actions.time, "sleep", slept.append)
+    monkeypatch.setattr(actions, "_type_text", lambda t: ran.append(t))
+    actions.execute(Action("multi", {"steps": [
+        {"action": {"type": "text", "params": {"text": "a"}}, "delay": 1e300},
+        {"action": {"type": "text", "params": {"text": "b"}}},
+    ]}))
+    assert ran == ["a", "b"]                 # the later step still ran
+    assert slept == [actions.MAX_STEP_DELAY]
+
+
+def test_volume_step_cannot_become_an_option(monkeypatch):
+    """A negative "Step %" built "-20%+", which wpctl reads as a flag."""
+    seen = []
+    monkeypatch.setattr(actions, "_run", lambda args, **k: seen.append(args))
+    monkeypatch.setattr(actions, "AUDIO", "pipewire")
+    actions._volume("up", "-20")
+    assert not any(str(a).startswith("-2") for a in seen[0])
+    assert "20%+" in seen[0]

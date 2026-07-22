@@ -99,6 +99,16 @@ if [ -z "\${APPIMAGE}" ]; then
     self="\$(readlink -f -- "\$0")"; APPDIR="\${self%/*}"
 fi
 export APPDIR="\${APPDIR:-\$(dirname "\$(readlink -f -- "\$0")")}"
+# Stash the host's own values BEFORE overwriting them. A key that launches an
+# app must hand that app the environment it would have had from a terminal,
+# not ours: a host python3 inheriting our PYTHONHOME dies looking for its
+# stdlib in our tree. actions.child_env() restores these for every program we
+# exec. Only variables the host actually set are stashed, so "unset" survives
+# the round trip as unset rather than as empty.
+for _v in PYTHONHOME PYTHONPATH PYTHONDONTWRITEBYTECODE LD_LIBRARY_PATH LD_PRELOAD QT_PLUGIN_PATH QT_QPA_PLATFORM_PLUGIN_PATH; do
+    if [ -n "\${!_v+x}" ]; then export "FIFINE_HOST_\${_v}=\${!_v}"; fi
+done
+unset _v
 PYHOME="\${APPDIR}/opt/python${PY_VER}"
 export PYTHONHOME="\${PYHOME}"
 export PYTHONDONTWRITEBYTECODE=1

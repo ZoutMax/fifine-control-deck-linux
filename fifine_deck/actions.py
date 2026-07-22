@@ -177,10 +177,54 @@ def default_icon_for(action) -> tuple[str, str]:
     return ACTION_DEFAULT_ICON.get(t, ("", ""))
 
 
+# Variables a bundled launcher sets so OUR interpreter and OUR Qt resolve
+# inside the bundle. Every one of them is poison for anything else we exec,
+# and everything we exec is a host program: the user's apps, and the helpers
+# (wpctl, playerctl, xdotool, xdg-open, pkexec).
+#
+# The AppImage's AppRun exports PYTHONHOME, QT_PLUGIN_PATH and LD_LIBRARY_PATH;
+# the classic-snap wrapper exports those plus PYTHONPATH and
+# QT_QPA_PLATFORM_PLUGIN_PATH. Inherited by a child, PYTHONHOME sends a host
+# python3 looking for its stdlib in our 3.12 tree, where it dies with
+# "No module named 'encodings'" before running a line — the exact failure the
+# snap wrapper's own comment describes for its own interpreter. LD_LIBRARY_PATH
+# puts our bundled libQt6 ahead of a host Qt app's own.
+#
+# So a key bound to meld, virt-manager, solaar or any python3 script simply did
+# not start, and only on the AppImage and snap builds.
+_BUNDLE_ENV_VARS = (
+    "PYTHONHOME", "PYTHONPATH", "PYTHONDONTWRITEBYTECODE",
+    "LD_LIBRARY_PATH", "LD_PRELOAD",
+    "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH",
+)
+
+
+def child_env() -> dict:
+    """The environment for a program we exec on the user's behalf.
+
+    Our launchers stash whatever the host had in FIFINE_HOST_<VAR> before
+    overwriting it, so the honest fix is to put those values back. When there
+    is no stash and we can see we are inside a bundle (APPDIR from AppRun,
+    SNAP from snapd), the variable is ours alone and is dropped entirely.
+
+    Outside a bundle nothing matches and the environment passes through
+    untouched, so .deb, PPA and source installs are unaffected.
+    """
+    env = dict(os.environ)
+    bundled = bool(env.get("APPDIR") or env.get("SNAP"))
+    for var in _BUNDLE_ENV_VARS:
+        saved = env.pop("FIFINE_HOST_" + var, None)
+        if saved is not None:
+            env[var] = saved
+        elif bundled:
+            env.pop(var, None)
+    return env
+
+
 def _popen_detached(args, shell=False):
     """Launch a detached process (survives the app exiting)."""
     subprocess.Popen(
-        args, shell=shell, start_new_session=True,
+        args, shell=shell, start_new_session=True, env=child_env(),
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL,
     )
 
@@ -198,6 +242,9 @@ def _run(args, input_text: bytes | None = None, **kw):
     """
     kw.setdefault("timeout", 8)
     kw.setdefault("stderr", subprocess.DEVNULL)
+    # Helpers are host binaries too, so they get the same de-bundled
+    # environment as a user-launched app — see child_env().
+    kw.setdefault("env", child_env())
     try:
         subprocess.run(args, input=input_text, **kw)
     except Exception as e:
@@ -337,12 +384,22 @@ def _media(cmd: str) -> None:
 
 SINK = "@DEFAULT_AUDIO_SINK@"
 
+# Upper bound for a multi-action's per-step delay, matching the step editor's
+# own QDoubleSpinBox range (gui/widgets.py). Enforced here too because the
+# executor also reads hand-edited configs.
+MAX_STEP_DELAY = 30.0
+
 
 def _volume(cmd: str, step: str) -> None:
     try:
-        pct = int(str(step or "5").strip().rstrip("%"))
+        pct = int(str(step if str(step).strip() else "5").strip().rstrip("%"))
     except ValueError:
         pct = 5
+    # The GUI's "Step %" is free text. A negative one built "-20%+", which
+    # wpctl's option parser reads as a flag rather than a value: stderr goes to
+    # DEVNULL, so the key just did nothing. Clamp to a range that can only ever
+    # be an argument.
+    pct = max(1, min(100, abs(pct)))
     if AUDIO == "pipewire":
         if cmd == "up":
             _run(["wpctl", "set-volume", "-l", "1.5", SINK, f"{pct}%+"])
@@ -428,7 +485,11 @@ def execute(action, context: ActionContext | None = None) -> None:
             context.switch_profile(p.get("profile_id", ""))
         elif t == "brightness" and context:
             mode = p.get("mode", "set")
-            val = int(p.get("value", "10") or "10")
+            # `or "10"` would turn a JSON numeric 0 into 10, because 0 is
+            # falsy — so "brightness set 0" silently became 10. Only a missing
+            # or blank value takes the default.
+            raw = p.get("value", "10")
+            val = int(raw) if str(raw).strip() not in ("", "None") else 10
             if mode == "set":
                 context.set_brightness(val)
             elif mode == "up":
@@ -449,6 +510,19 @@ def execute(action, context: ActionContext | None = None) -> None:
                     delay = float(step.get("delay", 0) or 0)
                 except (TypeError, ValueError):
                     delay = 0.0
+                # Clamp, for two reasons. A hand-edited delay above ~9.2e18
+                # makes time.sleep raise OverflowError, which escapes to the
+                # outer guard and drops every remaining step — defeating the
+                # comment above. And this sleep holds the single action worker,
+                # so an unbounded delay makes the WHOLE deck unresponsive:
+                # every other key press queues up behind it and then replays in
+                # a burst. MAX_STEP_DELAY matches the step editor's own limit,
+                # so nothing a user can build in the GUI is affected.
+                if delay > MAX_STEP_DELAY:
+                    log.warning("multi step delay %.6g s clamped to %g s; the "
+                                "deck cannot answer any other key while it "
+                                "waits", delay, MAX_STEP_DELAY)
+                    delay = MAX_STEP_DELAY
                 if delay > 0:
                     time.sleep(delay)
         else:

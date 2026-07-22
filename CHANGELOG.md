@@ -4,6 +4,35 @@ All notable changes to **fifine Control Deck** are documented here. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and the project
 follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Apps launched from a key now start on the AppImage and snap builds.** Those
+  two launchers point `PYTHONHOME`, `LD_LIBRARY_PATH` and `QT_PLUGIN_PATH`
+  inside the bundle so the app finds its own Python and Qt, and every program a
+  key launched inherited them. A host `python3` handed our `PYTHONHOME` looks
+  for its standard library in our bundle and dies with "No module named
+  'encodings'" before running a line, so a key bound to anything written in
+  Python, such as `meld`, `virt-manager`, `solaar` or your own scripts, did
+  nothing at all. The launchers now save the host's real values first and the
+  app restores them for every program it runs, including the helper tools. The
+  `.deb`, PPA and source installs were never affected and are unchanged.
+- **A knob gesture set to "Open folder" no longer does nothing silently.** A
+  folder belongs to a key, and a knob has nowhere to hold one, so the action was
+  dispatched and dropped. It is no longer offered for knobs; "Back out of
+  folder" still is, and works.
+- **"Brightness: set to 0" no longer means 10.** A zero read from the config
+  file was treated as "no value given".
+- **A negative volume step no longer kills the key.** "Step %" is a free text
+  field; a value like `-20` built an argument that `wpctl` read as a
+  command-line flag, so the key silently did nothing. The step is now clamped to
+  1-100.
+- **A hand-edited step delay can no longer abandon the rest of a multi-action.**
+  A delay beyond what the clock can represent raised an error that dropped every
+  later step. Delays are clamped to the 30 s the editor already allows, and a
+  clamped delay says so in the log, noting that the deck cannot answer any other
+  key while it waits.
+
 ## [0.11.3] - 2026-07-22
 
 No changes to the application itself: this release exists to publish the

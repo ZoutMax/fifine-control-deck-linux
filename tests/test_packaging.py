@@ -364,3 +364,36 @@ def test_appimage_is_documented():
     doc = _read("docs/APPIMAGE.md")
     assert "70-fifine-deck.rules" in doc, "the udev step is the one manual step"
     assert "build-appimage.sh" in doc
+
+
+def test_bundled_launchers_stash_the_hosts_environment():
+    """Both bundle launchers must save the host's values before overwriting.
+
+    The AppImage AppRun and the classic-snap wrapper export PYTHONHOME,
+    LD_LIBRARY_PATH and QT_PLUGIN_PATH so OUR interpreter and Qt resolve inside
+    the bundle. Those are inherited by every program a key launches, where a
+    host python3 dies with "No module named 'encodings'" before running a line.
+    actions.child_env() puts the host's values back, but only if the launcher
+    stashed them first — so the two halves have to stay in step.
+    """
+    from fifine_deck.actions import _BUNDLE_ENV_VARS
+
+    for rel in ("packaging/build-appimage.sh",
+                "snap/local/bin/fifine-control-deck-launch"):
+        text = _read(rel)
+        assert "FIFINE_HOST_" in text, f"{rel} no longer stashes the host env"
+        stash = text.index("FIFINE_HOST_")
+        for var in ("PYTHONHOME", "LD_LIBRARY_PATH", "QT_PLUGIN_PATH"):
+            assert var in text[:stash] + text[stash:stash + 400], (
+                f"{rel}: {var} missing from the stash list")
+        # The stash has to come BEFORE the first override, or it saves ours.
+        first_override = min(
+            (text.index(f"export {v}=") for v in ("PYTHONHOME", "LD_LIBRARY_PATH")
+             if f"export {v}=" in text), default=len(text))
+        assert stash < first_override, (
+            f"{rel} stashes the environment after overwriting it")
+
+    # every variable the launchers set must be one child_env() knows to undo
+    for var in ("PYTHONHOME", "PYTHONPATH", "LD_LIBRARY_PATH",
+                "QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH"):
+        assert var in _BUNDLE_ENV_VARS

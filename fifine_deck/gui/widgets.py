@@ -968,8 +968,14 @@ class KnobEditor(QWidget):
         for name, action in (("Press", kn.press), ("Rotate ◀", kn.left), ("Rotate ▶", kn.right)):
             v.addWidget(QLabel(name))
             # monitor is display-only — bound to a knob gesture it would be a
-            # silent no-op, so don't offer it
-            p = ActionParamsWidget(exclude={"monitor"})
+            # silent no-op, so don't offer it. Nor is open_folder: a folder
+            # lives in a KEY's folder slot, KnobConfig has no equivalent, and
+            # the dispatcher has nothing to open — picking it logged
+            # "unhandled or context-less action: open_folder" and the gesture
+            # did nothing at all. The hold-action editor already excludes it
+            # for the same reason; this was the list that was missed.
+            # folder_back stays, since it needs no folder reference and works.
+            p = ActionParamsWidget(exclude={"monitor", "open_folder"})
             p.set_action(action)
             p.changed.connect(self._emit)
             self._pickers[name] = p
