@@ -44,6 +44,11 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.11.2" date="2026-07-22">
+      <description>
+        <p>Memory no longer climbs as you switch pages: repainting a key that already shows the same picture is skipped, which over a soak of 600 switches cut growth from 82 MB to 7 MB. Pages with more than six animated keys stop re-decoding them on every switch, a password inside a multi-action is no longer exported without warning, and the app now tells you when it cannot read your configuration instead of silently starting fresh.</p>
+      </description>
+    </release>
     <release version="0.11.1" date="2026-07-21">
       <description>
         <p>Animated keys no longer stall the window the first time they appear. Decoding an animation now happens on its own thread, so the key shows its static face immediately and starts animating a moment later, instead of freezing the interface for about a quarter of a second per animated key.</p>

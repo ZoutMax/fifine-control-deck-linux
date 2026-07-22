@@ -4,6 +4,38 @@ All notable changes to **fifine Control Deck** are documented here. The format
 is based on [Keep a Changelog](https://keepachangelog.com/), and the project
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.11.2] - 2026-07-22
+
+Follow-up to 0.11.1, from a targeted re-audit and the first real soak test
+against the hardware.
+
+### Fixed
+- **Memory no longer climbs while you use the app.** Every page, profile or
+  folder switch repainted all fifteen keys, even the ones already showing
+  exactly that picture. Redundant writes are now skipped. Over a soak of 600
+  switches the process grew 82 MB before and 7 MB after. The underlying cost is
+  inside the vendored device library and cannot be removed here, so the fix is
+  to stop asking for work that changes nothing — which also cuts USB traffic.
+- **Animated keys stop re-decoding when a page has more than six of them.** The
+  decode cache held six entries while the deck has fifteen keys, so a page full
+  of animations evicted and re-decoded on every switch, and each key visibly
+  flicked from static back to animated.
+- **A password inside a Multi-action is no longer exported without warning.**
+  The export check looked at the wrong level of a multi-action step, so it never
+  saw those passwords — precisely the case the warning exists for.
+- **An animated key no longer loses its background decoding after an unplug.**
+  A decode skipped because the deck had just been unplugged was recorded as a
+  permanent failure, so after plugging back in that key decoded on the interface
+  thread again, stalling the window for about a quarter of a second.
+- **The app now says when it cannot read your configuration.** It renames the
+  unreadable file and starts fresh, which from the outside looks exactly like
+  losing every profile. It now tells you, and where the old file went.
+
+### Internal
+- The test suite was failing on a developer machine while passing in CI, because
+  tests could reach the real home directory. Every test now runs against a
+  sandboxed home, with a tripwire that fails if that protection is removed.
+
 ## [0.11.1] - 2026-07-21
 
 ### Fixed
