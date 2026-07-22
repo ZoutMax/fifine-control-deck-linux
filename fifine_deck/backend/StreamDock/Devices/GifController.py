@@ -35,9 +35,17 @@ class GifController:
 
     _BACKGROUND_INDEX = 0
     _DEFAULT_DELAY_MS = 100
-    # LOCAL PATCH: decoded-GIF cache size. Frame data is large and a page holds
-    # only a handful of animated keys, so a small cap is plenty.
-    _DECODE_CACHE_MAX = 6
+    # LOCAL PATCH: decoded-GIF cache size. Must comfortably exceed the number of
+    # keys a device has, or a page animating most of them thrashes: entries are
+    # evicted and re-decoded on every page render — wasted CPU, and each key
+    # visibly flicks from static back to animated on every page switch.
+    #
+    # First set to 6 on the assumption that "frame data is large". That was
+    # wrong: frames are downscaled to the key's size (112x112) and JPEG encoded,
+    # so a 90-frame animation measures 73 KB, not megabytes. The 293V3 has 15
+    # keys, so 6 sat BELOW the number of keys it had to serve. At 32 the worst
+    # case is about 2.3 MB, and being smaller buys nothing.
+    _DECODE_CACHE_MAX = 32
 
     def __init__(self, device):
         self._device = device

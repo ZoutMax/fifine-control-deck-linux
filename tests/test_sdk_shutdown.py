@@ -741,3 +741,38 @@ def test_a_device_without_the_helpers_behaves_as_before(tmp_path):
     ctl = _Old()
     c, dev = _controller_with_gif_ctl(ctl)
     assert c._gif_decode_ready(dev, 3, str(tmp_path / "a.gif")) is True
+
+
+def test_the_decode_cache_can_hold_every_key_on_the_device():
+    """The cache was capped at 6 while the 293V3 has 15 keys, all of which can
+    be animated. A page animating more than 6 keys therefore evicted and
+    re-decoded entries on EVERY page render — wasted CPU, and each key visibly
+    flicking from static back to animated on every switch.
+
+    The cap has to track the device, not a guess. It was originally justified by
+    "frame data is large"; measured, a 90-frame animation is 73 KB, so the cap
+    was costing correctness to save a fraction of a megabyte."""
+    from fifine_deck.device import DEVICE_PROFILE
+    keys = DEVICE_PROFILE["key_count"]
+    assert gc_mod.GifController._DECODE_CACHE_MAX > keys, (
+        f"cache holds {gc_mod.GifController._DECODE_CACHE_MAX} but the device has "
+        f"{keys} animatable keys — a full page will thrash")
+
+
+def test_a_full_page_of_animations_does_not_evict_itself(tmp_path):
+    """The behavioural version: decode one distinct file per key, then re-read
+    them all. With a cap below the key count the second pass re-decodes."""
+    from fifine_deck.device import DEVICE_PROFILE
+    ctl = _gif_controller_for_decode()
+    keys = DEVICE_PROFILE["key_count"]
+    paths = [_make_gif(tmp_path / f"k{i}.gif", 3) for i in range(keys)]
+    for p in paths:
+        ctl._read_gif(p, FMT, True)
+
+    decodes = []
+    real = ctl._read_gif_uncached
+    ctl._read_gif_uncached = lambda p, f, a: (decodes.append(p), real(p, f, a))[1]
+    for p in paths:                       # a second full-page render
+        ctl._read_gif(p, FMT, True)
+
+    assert decodes == [], f"{len(decodes)} of {keys} keys re-decoded on the second pass"
