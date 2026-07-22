@@ -44,6 +44,11 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.12.0" date="2026-07-22">
+      <description>
+        <p>Three audits: data-loss confirmations, backup slots that no longer overwrite each other, launched apps fixed on the AppImage and snap, and monitor keys that report a dead deck</p>
+      </description>
+    </release>
     <release version="0.11.3" date="2026-07-22">
       <description>
         <p>Adds an AppImage so the app can be installed on distributions without apt, such as Fedora, Arch, openSUSE and SteamOS. It is a single file that brings its own Python and Qt. The application itself is unchanged from 0.11.2.</p>
