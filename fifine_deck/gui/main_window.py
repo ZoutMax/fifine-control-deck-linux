@@ -631,8 +631,15 @@ class MainWindow(QMainWindow):
                 f"Delete '{page.name}'?\n\nThis removes {loss}.\n"
                 f"It cannot be undone.") != QMessageBox.StandardButton.Yes:
             return
-        del cont.pages[self.controller.page_index]
-        self.controller.page_index = 0
+        # Under the controller's lock: controller.page() clamps page_index
+        # against len(pages) and then indexes, so between the del and the
+        # reassignment below a reader (the SDK reader thread dispatching a key
+        # press, the monitor thread) could clamp against the old length and
+        # index the shortened list. The lock page() takes is an RLock on the
+        # controller, and this is the one mutation of pages that ran outside it.
+        with self.controller._lock:
+            del cont.pages[self.controller.page_index]
+            self.controller.page_index = 0
         # The editor/knob panels may be bound to the page we just deleted.
         # The async page-change resync can't be relied on to clear them:
         # deleting the page at index 0 keeps (container, page_index) equal,
@@ -939,6 +946,16 @@ class MainWindow(QMainWindow):
         self._update_breadcrumb()
         if changed:
             self._deselect()
+            # A profile switched FROM THE DECK mutates config.active_profile_id
+            # and nothing armed the debounced save, so the choice was lost on
+            # anything but a clean quit. Same gap the brightness path already
+            # closed for the deck's brightness keys. The page index is not
+            # persisted at all by design, so only a profile change is worth a
+            # write.
+            if self.config.active_profile_id != getattr(
+                    self, "_last_saved_profile_id", self.config.active_profile_id):
+                self._queue_save()
+        self._last_saved_profile_id = self.config.active_profile_id
 
     def _set_status(self):
         from ..actions import environment_summary

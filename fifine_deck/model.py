@@ -180,9 +180,18 @@ class Page:
         keys: dict[int, KeyConfig] = {}
         for k, v in _as_dict(d.get("keys")).items():
             try:
-                keys[int(k)] = KeyConfig.from_dict(v)
+                idx = int(k)
             except (TypeError, ValueError):
                 continue        # malformed index: drop the entry, keep the page
+            if idx in keys:
+                # int() maps "1", "01" and " 1" to the same slot, so a
+                # hand-edited page could hold two entries for one key and the
+                # last one iterated silently won. Say which one was dropped
+                # rather than letting a key quietly change behaviour.
+                log.warning("page %r: key %r duplicates key %s; keeping the "
+                            "first and ignoring this one", d.get("name"), k, idx)
+                continue
+            keys[idx] = KeyConfig.from_dict(v)
         knobs: dict[int, KnobConfig] = {}
         for k, v in _as_dict(d.get("knobs")).items():
             try:
@@ -475,7 +484,13 @@ class DeckConfig:
                 cfg.version = CONFIG_VERSION
             return cfg
         except (json.JSONDecodeError, AttributeError, ValueError,
-                TypeError, KeyError):
+                TypeError, KeyError, RecursionError):
+            # RecursionError is a RuntimeError, so it used to sail past this
+            # list and out of load() as an unhandled crash at startup. Folders
+            # nest arbitrarily and from_dict recurses per level, so a config
+            # with a few hundred levels — hand-written, or synced from a build
+            # with a deeper limit — has to take the preserve-and-restart path
+            # like any other unreadable file.
             # Corrupt or structurally-invalid config (bad JSON *or* wrong shape):
             # preserve it and start fresh rather than crash on launch. NOT
             # ".bak" — that's the import flow's backup of a known-GOOD config

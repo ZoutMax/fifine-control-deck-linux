@@ -495,7 +495,28 @@ class ActionParamsWidget(QWidget):
     def _collect(self, peek: bool = False):
         if self._multi_editor is not None:
             return {"steps": self._multi_editor.get_steps(peek)}
+        # Start from what was there. This walks only the widgets built from
+        # THIS build's ACTION_TYPES spec, so a param the spec does not list was
+        # simply dropped — and every path here runs on unrelated edits, since
+        # _on_edit reassigns the whole action when you touch the label or a
+        # colour. A hotkey gaining an option in v2, the config syncing back to a
+        # v1 machine, and one rename there was enough to destroy it: the same
+        # forward-compatibility loss the .v<N> backup exists to prevent, one
+        # layer up. Unknown TYPES were already protected (see get_action); this
+        # is the same protection for unknown params of a known type.
+        #
+        # Only params NO widget owns are carried over. A managed one must still
+        # be free to disappear: clearing a password key deliberately drops both
+        # "password" and "secret_id", and preserving those would resurrect a
+        # secret the user just deleted.
+        managed = set(self._params)
+        if any(w.property("kind") == "password" for w in self._params.values()):
+            managed |= {"password", "secret_id"}
+        managed.add("steps")            # a non-multi action has no steps
         out = {}
+        if self._orig_action.type == self.type_combo.currentData():
+            out = {k: v for k, v in self._orig_action.params.items()
+                   if k not in managed}
         for k, w in self._params.items():
             if isinstance(w, QPlainTextEdit):
                 out[k] = w.toPlainText()

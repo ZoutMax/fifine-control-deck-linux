@@ -572,3 +572,55 @@ def test_a_failed_rename_leaves_no_stray_tmp(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         DeckConfig().save(path)
     assert not os.path.exists(path + ".tmp")
+
+
+def test_unknown_params_survive_an_unrelated_edit(qapp_or_skip=None):
+    """A param this build's spec does not list must not be destroyed by
+    renaming the key. v2 adds a hotkey option, the config syncs back to a v1
+    machine, the user edits the label — the option is gone."""
+    import os as _os
+    _os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip("PyQt6")
+    from PyQt6.QtWidgets import QApplication
+    from fifine_deck.gui.widgets import ActionParamsWidget
+    app = QApplication.instance() or QApplication([])
+    w = ActionParamsWidget()
+    w.set_action(Action("hotkey", {"keys": "ctrl+c", "repeat": "3",
+                                   "release_delay": "0.2"}))
+    got = w.get_action()
+    assert got.params["keys"] == "ctrl+c"
+    assert got.params.get("repeat") == "3", "an unknown param was dropped"
+    assert got.params.get("release_delay") == "0.2"
+    del app
+
+
+def test_duplicate_key_indices_are_reported_not_silently_merged(caplog):
+    """int() maps "1", "01" and " 1" to one slot, so a hand-edited page could
+    hold two entries for one key and the last one iterated silently won."""
+    from fifine_deck.model import Page
+    data = {"name": "P", "keys": {"1": {"label": "one"},
+                                  "01": {"label": "ONE-DUP"}}}
+    with caplog.at_level("WARNING"):
+        page = Page.from_dict(data)
+    assert page.keys[1].label == "one", "the first entry should win"
+    assert any("duplicat" in r.message for r in caplog.records), \
+        "a dropped key was not reported"
+
+
+def test_a_pathologically_nested_config_is_recovered_not_a_crash(tmp_path):
+    """RecursionError is a RuntimeError, so it sailed past load()'s except list
+    and out as an unhandled crash at startup."""
+    path = str(tmp_path / "config.json")
+    # built as TEXT: json.dump recurses too, so a nested dict this deep cannot
+    # even be serialized here
+    head = ('{"pages":[{"name":"p","keys":{"1":{"label":"f","action":'
+            '{"type":"open_folder","params":{}},"folder":')
+    tail = "}}}]}"
+    inner = '{"pages":[{"name":"p","keys":{}}]}'
+    doc = head * 600 + inner + tail * 600
+    with open(path, "w") as f:
+        f.write('{"version": 1, "profiles": [' + doc[:-1] + ',"name":"deep","id":"d"}]}')
+
+    cfg = DeckConfig.load(path)          # must not raise
+    assert cfg.profiles
+    assert os.path.exists(path + ".corrupt")
