@@ -464,3 +464,54 @@ class DeckConfig:
             cfg = cls()
             cfg.save(path)
             return cfg
+
+
+def _is_users_work(kc) -> bool:
+    """True if this key is something the user made, rather than scaffolding.
+
+    Every folder page is created with a Back key, so counting it would tell a
+    user their empty folder holds one key and inflate every nested total by the
+    number of pages.
+    """
+    return not kc.is_empty() and kc.action.type != "folder_back"
+
+
+def _folder_loss_summary(folder) -> str:
+    """How much is inside a folder, counted through every nested level.
+
+    Used by the confirmations for destructive edits: what a folder holds is
+    invisible from the key that owns it, so "this deletes a folder" is not
+    enough information to answer with.
+    """
+    keys = pages = 0
+    stack = [folder]
+    while stack:
+        f = stack.pop()
+        for page in getattr(f, "pages", []):
+            pages += 1
+            for kc in page.keys.values():
+                if _is_users_work(kc):
+                    keys += 1
+                if kc.folder is not None:
+                    stack.append(kc.folder)
+    bits = []
+    if keys:
+        bits.append(f"{keys} key{'s' if keys != 1 else ''}")
+    if pages > 1:
+        bits.append(f"{pages} pages")
+    return " across ".join(bits)
+
+
+def _page_loss_summary(page) -> str:
+    """What deleting `page` would destroy, or "" if the page is untouched."""
+    keys = [kc for kc in page.keys.values() if _is_users_work(kc)]
+    folders = [kc for kc in keys if kc.folder is not None]
+    if not keys:
+        return ""
+    bits = [f"{len(keys)} configured key{'s' if len(keys) != 1 else ''}"]
+    for kc in folders:
+        inner = _folder_loss_summary(kc.folder)
+        name = kc.label or "a folder"
+        bits.append(f"the folder '{name}'"
+                    + (f" ({inner})" if inner else " (empty)"))
+    return ", including ".join([bits[0], "; ".join(bits[1:])]) if folders else bits[0]

@@ -15,7 +15,8 @@ from PyQt6.QtWidgets import (
 
 from .. import rendering, assets
 from ..device import DEVICE_PROFILE
-from ..model import DeckConfig, Profile, Page, KeyConfig, Action, Folder
+from ..model import (DeckConfig, Profile, Page, KeyConfig, Action, Folder,
+                     _page_loss_summary)
 from ..actions import default_icon_for
 from ..controller import DeckController
 from .widgets import (KeyButton, ActionEditor, ActionCatalog, KnobEditor,
@@ -594,6 +595,19 @@ class MainWindow(QMainWindow):
         cont = self._container()
         if len(cont.pages) <= 1:
             QMessageBox.information(self, "Delete page", "At least one page is required.")
+            return
+        page = cont.pages[self.controller.page_index]
+        # Ask before destroying work. The "–" button is a 32 px square right
+        # beside "+" and "⇅", one misclick takes every key on the page plus any
+        # folder tree hanging off it at unlimited depth, and the autosave 600 ms
+        # later makes it permanent. _del_profile next door already asks.
+        #
+        # An untouched page is not work, so deleting one keeps costing nothing.
+        loss = _page_loss_summary(page)
+        if loss and QMessageBox.question(
+                self, "Delete page",
+                f"Delete '{page.name}'?\n\nThis removes {loss}.\n"
+                f"It cannot be undone.") != QMessageBox.StandardButton.Yes:
             return
         del cont.pages[self.controller.page_index]
         self.controller.page_index = 0

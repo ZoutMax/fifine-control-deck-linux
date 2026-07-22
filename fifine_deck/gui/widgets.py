@@ -16,7 +16,7 @@ from typing import Callable
 
 from .. import rendering, assets
 from ..actions import ACTION_TYPES, ACTION_CATALOG
-from ..model import KeyConfig, KnobConfig, Action
+from ..model import KeyConfig, KnobConfig, Action, _folder_loss_summary
 
 log = logging.getLogger(__name__)
 
@@ -811,6 +811,20 @@ class ActionEditor(QWidget):
         """Reset the selected key to empty (label, icon, colours, action)."""
         if self._kc is None or self._index is None:
             return
+        # A folder's contents are invisible from this panel, and the button
+        # says "Clear key", not "delete a folder of shortcuts". Wiping it
+        # silently is the same data loss _ensure_folder was hardened against;
+        # the difference here is that clearing IS deliberate, so ask rather
+        # than refuse. Only worth a prompt when there is something to lose.
+        if self._kc.folder is not None:
+            inner = _folder_loss_summary(self._kc.folder)
+            if inner and QMessageBox.question(
+                    self, "Clear key",
+                    f"This key holds a folder containing {inner}.\n\n"
+                    f"Clearing the key deletes the folder and everything in "
+                    f"it. This cannot be undone.\n\nClear it anyway?"
+            ) != QMessageBox.StandardButton.Yes:
+                return
         default = KeyConfig()
         self._kc.label = default.label
         self._kc.icon = default.icon

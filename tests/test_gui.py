@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import QApplication, QMessageBox     # noqa: E402
 from fifine_deck import actions                            # noqa: E402
 from fifine_deck.controller import DeckController          # noqa: E402
 from fifine_deck.gui import main_window as mw              # noqa: E402
+from fifine_deck.gui import widgets as wdg                 # noqa: E402
 from fifine_deck.model import DeckConfig                   # noqa: E402
 from tests.test_controller import MockDevice               # noqa: E402
 
@@ -84,6 +85,10 @@ def win(qapp, monkeypatch):
     _AutoBox.tick = False
     _AutoBox.answer = QMessageBox.StandardButton.No
     monkeypatch.setattr(mw, "QMessageBox", _AutoBox)
+    # widgets.py asks too (ActionEditor._clear_key confirms before it
+    # destroys a folder), and an unstubbed static question() blocks the
+    # whole run on a modal that nothing will ever answer.
+    monkeypatch.setattr(wdg, "QMessageBox", _AutoBox)
 
     cfg = DeckConfig()
     c = DeckController(cfg)
@@ -329,10 +334,25 @@ def test_the_explicit_clear_button_does_delete_the_folder(win):
     kc.action = mw.Action("open_folder", {})
     w._ensure_folder(kc)
     assert kc.folder is not None
+    # put real work inside it: a folder holding nothing but its auto-created
+    # Back key is not worth a confirmation, and does not get one
+    inner = kc.folder.pages[0].key(2)
+    inner.label = "Inner"
+    inner.action = mw.Action("launch_app", {"command": "gimp"})
 
     kc.label = "L"; kc.icon = "lib:star"
     kc.bg_color = "#111111"; kc.text_color = "#eeeeee"
     w.editor.set_key(kc, 1)
+
+    # ...but it must ASK first: what the folder holds is invisible from this
+    # panel, so "Clear key" reads as blanking a face, not deleting pages.
+    _AutoBox.answer = QMessageBox.StandardButton.No
+    w.editor.clear_btn.click()
+    assert kc.folder is not None, "declining the confirmation still wiped it"
+    assert kc.label == "L", "declining still cleared the rest of the key"
+    assert _AutoBox.questions, "Clear key destroyed a folder without asking"
+
+    _AutoBox.answer = QMessageBox.StandardButton.Yes
     w.editor.clear_btn.click()            # the REAL button, not the method
 
     default = mw.KeyConfig()
@@ -1427,3 +1447,76 @@ def test_delegated_autostart_applies_even_when_the_menu_state_is_stale(win, tmp_
     assert w.apply_autostart(False) is True
     assert not entry.exists()
     assert w.autostart_act.isChecked() is False
+
+
+# -- destructive edits must ask ---------------------------------------------
+
+def _stock_folder_key(w, cfg, index=1, label="Work"):
+    """A key holding a folder with a page and a configured key inside it."""
+    kc = cfg.active_profile().pages[0].key(index)
+    kc.label = label
+    kc.action = mw.Action("open_folder", {})
+    w._ensure_folder(kc)
+    inner = kc.folder.pages[0].key(1)
+    inner.label = "Inner"
+    inner.action = mw.Action("launch_app", {"command": "gimp"})
+    return kc
+
+
+def test_deleting_a_page_with_work_on_it_asks_first(win):
+    """A misclick on the 32 px "–" must not silently destroy a page, its keys,
+    and any folder tree hanging off it. _del_profile beside it already asks."""
+    from fifine_deck.model import Page
+    w, cfg, c = win
+    cont = cfg.active_profile()
+    cont.pages.append(Page(name="P2"))
+    w._reload_pages()
+    _stock_folder_key(w, cfg)
+    doomed = cont.pages[0]
+
+    _AutoBox.answer = QMessageBox.StandardButton.No
+    w._del_page()
+    assert doomed in cont.pages, "declining the confirmation deleted it anyway"
+    assert _AutoBox.questions, "a page with keys on it was deleted without asking"
+    # the prompt has to say what is at stake, or it is just a speed bump
+    text = _AutoBox.questions[-1]
+    assert "configured key" in text
+    assert "Work" in text and "Inner" not in text     # names the folder, not its guts
+
+    _AutoBox.answer = QMessageBox.StandardButton.Yes
+    w._del_page()
+    assert doomed not in cont.pages
+
+
+def test_deleting_an_untouched_page_does_not_nag(win):
+    """Adding and removing empty pages while experimenting must stay free."""
+    from fifine_deck.model import Page
+    w, cfg, c = win
+    cont = cfg.active_profile()
+    cont.pages.append(Page(name="P2"))
+    w._reload_pages()
+    _AutoBox.questions = []
+    _AutoBox.answer = QMessageBox.StandardButton.No     # would cancel if asked
+    w._del_page()
+    assert len(cont.pages) == 1, "an empty page needed a confirmation"
+    assert not _AutoBox.questions
+
+
+def test_the_page_prompt_counts_a_nested_folder_tree(win):
+    """What a folder holds is invisible from the page, so the prompt counts
+    through every level rather than saying "and a folder"."""
+    from fifine_deck.model import Page
+    w, cfg, c = win
+    cont = cfg.active_profile()
+    cont.pages.append(Page(name="P2"))
+    w._reload_pages()
+    kc = _stock_folder_key(w, cfg)
+    deep = kc.folder.pages[0].key(2)
+    deep.action = mw.Action("open_folder", {})
+    w._ensure_folder(deep)
+    deep.folder.pages[0].key(1).action = mw.Action("launch_app", {"command": "x"})
+
+    _AutoBox.answer = QMessageBox.StandardButton.No
+    w._del_page()
+    text = _AutoBox.questions[-1]
+    assert "3 keys" in text, f"nested keys not counted: {text!r}"
