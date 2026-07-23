@@ -44,6 +44,11 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.12.4" date="2026-07-23">
+      <description>
+        <p>Five fixes from a whole-codebase architecture audit: real device write errors are detected, reordering pages no longer crashes on a deck race, the headless service saves deck-driven brightness/profile, a GPU-key NVML leak, and password secrets are removed from the keyring when a key is cleared</p>
+      </description>
+    </release>
     <release version="0.12.3" date="2026-07-23">
       <description>
         <p>Fixes a folder being stranded when its page is deleted while the deck navigated into it during the confirmation</p>

@@ -1,3 +1,13 @@
+fifine-control-deck (0.12.4) noble; urgency=medium
+
+  * Five fixes from a whole-codebase architecture audit: real device
+    write errors are detected, reordering pages no longer crashes on a
+    deck race, the headless service saves deck-driven
+    brightness/profile, a GPU-key NVML leak, and password secrets are
+    removed from the keyring when a key is cleared
+
+ -- ZoutMax <150600436+ZoutMax@users.noreply.github.com>  Thu, 23 Jul 2026 18:41:06 +0200
+
 fifine-control-deck (0.12.3) noble; urgency=medium
 
   * Fixes a folder being stranded when its page is deleted while the
